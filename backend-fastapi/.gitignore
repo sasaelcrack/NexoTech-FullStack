@@ -1,0 +1,14 @@
+# Entorno y secretos locales
+.env
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Logs y archivos locales
+*.log
+.DS_Store

@@ -1,0 +1,21 @@
+# Secretos y configuración local
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Entornos y dependencias
+**/venv/
+**/.venv/
+**/node_modules/
+**/dist/
+
+# Cachés y archivos locales
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/*.log
+.vscode/
+.DS_Store

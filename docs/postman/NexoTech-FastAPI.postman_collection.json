@@ -1,0 +1,279 @@
+{
+  "info": {
+    "name": "NexoTech API - FastAPI",
+    "description": "Coleccion de pruebas para NexoTech con FastAPI, JWT, roles, CRUD, pedidos y recuperacion de contrasena.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://127.0.0.1:8000" },
+    { "key": "token", "value": "" },
+    { "key": "usuarioId", "value": "1" },
+    { "key": "productoId", "value": "1" },
+    { "key": "servicioId", "value": "1" },
+    { "key": "pedidoId", "value": "1" },
+    { "key": "correoPrueba", "value": "correo@example.com" },
+    { "key": "adminEmail", "value": "admin@admin.com" },
+    { "key": "adminPassword", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "00 - Estado y documentacion",
+      "item": [
+        {
+          "name": "Estado de la API",
+          "request": { "method": "GET", "url": "{{baseUrl}}/" }
+        },
+        {
+          "name": "Swagger UI",
+          "request": { "method": "GET", "url": "{{baseUrl}}/docs" }
+        },
+        {
+          "name": "OpenAPI JSON",
+          "request": { "method": "GET", "url": "{{baseUrl}}/openapi.json" }
+        }
+      ]
+    },
+    {
+      "name": "01 - Registro y login",
+      "item": [
+        {
+          "name": "Registrar cliente",
+          "event": [{
+            "listen": "prerequest",
+            "script": { "exec": ["pm.collectionVariables.set('correoCliente', 'cliente.' + Date.now() + '@example.com');", "pm.collectionVariables.set('documentoCliente', String(Date.now()).slice(-10));"] }
+          }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Carlos\",\n  \"apellido\": \"Ramirez\",\n  \"tipo_documento\": \"CC\",\n  \"numero_documento\": \"{{documentoCliente}}\",\n  \"direccion\": \"Calle 50 # 30-20\",\n  \"correo\": \"{{correoCliente}}\",\n  \"password\": \"ClienteSeguro9\",\n  \"telefono\": \"3011112222\"\n}"
+            },
+            "url": "{{baseUrl}}/api/usuarios/registro"
+          }
+        },
+        {
+          "name": "Login cliente y guardar JWT",
+          "event": [{
+            "listen": "test",
+            "script": { "exec": ["pm.test('Login correcto', function () { pm.response.to.have.status(200); });", "const data = pm.response.json();", "pm.collectionVariables.set('token', data.token);", "pm.collectionVariables.set('usuarioId', data.usuario.id);"] }
+          }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"{{correoCliente}}\",\n  \"password\": \"ClienteSeguro9\"\n}"
+            },
+            "url": "{{baseUrl}}/api/usuarios/login"
+          }
+        },
+        {
+          "name": "Login admin y guardar JWT",
+          "event": [{
+            "listen": "test",
+            "script": { "exec": ["pm.test('Login admin correcto', function () { pm.response.to.have.status(200); });", "const data = pm.response.json();", "pm.collectionVariables.set('token', data.token);", "pm.collectionVariables.set('usuarioId', data.usuario.id);"] }
+          }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"{{adminEmail}}\",\n  \"password\": \"{{adminPassword}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/usuarios/login"
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 - JWT y usuarios",
+      "item": [
+        {
+          "name": "Perfil autenticado",
+          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/api/usuarios/perfil" }
+        },
+        {
+          "name": "Mi perfil",
+          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/api/usuarios/me" }
+        },
+        {
+          "name": "Listar usuarios - requiere admin",
+          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/api/usuarios/" }
+        },
+        {
+          "name": "Consultar usuario por ID - requiere admin",
+          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/api/usuarios/{{usuarioId}}" }
+        },
+        {
+          "name": "Editar usuario por ID - requiere admin",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"nombre\": \"Usuario Actualizado\",\n  \"apellido\": \"Prueba\",\n  \"telefono\": \"3001234567\"\n}" },
+            "url": "{{baseUrl}}/api/usuarios/{{usuarioId}}"
+          }
+        },
+        {
+          "name": "Cambiar estado usuario - requiere admin",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"estado\": \"inactivo\"\n}" },
+            "url": "{{baseUrl}}/api/usuarios/{{usuarioId}}/estado"
+          }
+        },
+        {
+          "name": "Eliminar usuario - requiere admin",
+          "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/api/usuarios/{{usuarioId}}" }
+        },
+        {
+          "name": "Editar mi perfil",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"nombre\": \"Carlos Actualizado\",\n  \"apellido\": \"Ramirez\",\n  \"direccion\": \"Calle 10 # 20-30\",\n  \"telefono\": \"3001234567\"\n}" },
+            "url": "{{baseUrl}}/api/usuarios/me"
+          }
+        },
+        {
+          "name": "Recuperar contrasena",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"correo\": \"{{correoPrueba}}\"\n}" },
+            "url": "{{baseUrl}}/api/usuarios/recuperar"
+          }
+        },
+        {
+          "name": "Restablecer contrasena - token manual",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"token\": \"PEGA_AQUI_EL_TOKEN_DEL_ENLACE\",\n  \"password\": \"NuevaClave9\"\n}" },
+            "url": "{{baseUrl}}/api/usuarios/restablecer"
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 - Productos CRUD",
+      "item": [
+        {
+          "name": "Listar productos",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/productos/" }
+        },
+        {
+          "name": "Crear producto - admin o empleado",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"nombre\": \"Producto Postman\",\n  \"descripcion\": \"Producto creado desde Postman\",\n  \"precio\": 25000,\n  \"stock\": 10,\n  \"estado\": \"activo\"\n}" },
+            "url": "{{baseUrl}}/api/productos/"
+          }
+        },
+        {
+          "name": "Editar producto",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"nombre\": \"Producto Actualizado\",\n  \"descripcion\": \"Descripcion actualizada\",\n  \"precio\": 28000,\n  \"stock\": 8,\n  \"estado\": \"activo\"\n}" },
+            "url": "{{baseUrl}}/api/productos/{{productoId}}"
+          }
+        },
+        {
+          "name": "Cambiar estado producto",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"estado\": \"inactivo\"\n}" },
+            "url": "{{baseUrl}}/api/productos/{{productoId}}/estado"
+          }
+        },
+        {
+          "name": "Eliminar producto",
+          "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/api/productos/{{productoId}}" }
+        }
+      ]
+    },
+    {
+      "name": "04 - Servicios CRUD",
+      "item": [
+        {
+          "name": "Listar servicios",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/servicios/" }
+        },
+        {
+          "name": "Crear servicio - admin o empleado",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"nombre\": \"Servicio Postman\",\n  \"descripcion\": \"Servicio creado desde Postman\",\n  \"precio\": 70000,\n  \"estado\": \"activo\"\n}" },
+            "url": "{{baseUrl}}/api/servicios/"
+          }
+        },
+        {
+          "name": "Editar servicio",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"nombre\": \"Servicio Actualizado\",\n  \"descripcion\": \"Descripcion actualizada\",\n  \"precio\": 75000,\n  \"estado\": \"activo\"\n}" },
+            "url": "{{baseUrl}}/api/servicios/{{servicioId}}"
+          }
+        },
+        {
+          "name": "Eliminar servicio",
+          "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/api/servicios/{{servicioId}}" }
+        }
+      ]
+    },
+    {
+      "name": "05 - Roles y pedidos",
+      "item": [
+        {
+          "name": "Panel admin",
+          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/api/panel/admin" }
+        },
+        {
+          "name": "Panel empleado",
+          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/api/panel/empleado" }
+        },
+        {
+          "name": "Panel cliente",
+          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/api/panel/cliente" }
+        },
+        {
+          "name": "Crear pedido de producto",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"items\": [\n    {\n      \"tipo_item\": \"producto\",\n      \"id\": {{productoId}},\n      \"cantidad\": 1\n    }\n  ]\n}" },
+            "url": "{{baseUrl}}/api/pedidos/"
+          }
+        },
+        {
+          "name": "Crear pedido de servicio",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"items\": [\n    {\n      \"tipo_item\": \"servicio\",\n      \"id\": {{servicioId}},\n      \"cantidad\": 1\n    }\n  ]\n}" },
+            "url": "{{baseUrl}}/api/pedidos/"
+          }
+        },
+        {
+          "name": "Mis pedidos",
+          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/api/pedidos/mios" }
+        },
+        {
+          "name": "Cambiar estado pedido",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
+            "body": { "mode": "raw", "raw": "{\n  \"estado\": \"pagado\"\n}" },
+            "url": "{{baseUrl}}/api/pedidos/{{pedidoId}}/estado"
+          }
+        }
+      ]
+    }
+  ]
+}
