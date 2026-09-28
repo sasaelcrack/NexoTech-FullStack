@@ -1,5 +1,5 @@
-import logging
 import os
+import logging
 import threading
 from datetime import date
 
@@ -43,6 +43,22 @@ def _cuota_disponible() -> bool:
         return True
 
 
+def _extraer_texto_gemini(data: dict) -> str | None:
+    """Extrae texto de Gemini sin romper si el payload llega incompleto."""
+    candidates = data.get("candidates") or []
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        content = candidate.get("content") or {}
+        parts = content.get("parts") or []
+        for part in parts:
+            if isinstance(part, dict):
+                texto = part.get("text")
+                if isinstance(texto, str) and texto.strip():
+                    return texto.strip()
+    return None
+
+
 def generar_respuesta_ia(mensaje: str) -> str | None:
     """
     Intenta responder usando Gemini. Devuelve None si la IA no está configurada,
@@ -51,11 +67,11 @@ def generar_respuesta_ia(mensaje: str) -> str | None:
     """
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        return None
         logger.warning("Gemini is not configured: GEMINI_API_KEY is missing")
-    if not _cuota_disponible():
         return None
+    if not _cuota_disponible():
         logger.warning("Gemini fallback used: daily request limit reached")
+        return None
 
     modelo = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
     url = GEMINI_API_URL_TMPL.format(modelo=modelo)
@@ -78,21 +94,15 @@ def generar_respuesta_ia(mensaje: str) -> str | None:
         )
         respuesta.raise_for_status()
         data = respuesta.json()
-        texto = (
-            data.get("candidates", [{}])[0]
-            .get("content", {})
-            .get("parts", [{}])[0]
-            .get("text")
-        )
-        return texto.strip() if texto else None
+        texto = _extraer_texto_gemini(data)
         if not texto:
             logger.warning("Gemini returned no candidate text")
             return None
         logger.info("Gemini response received successfully")
-        return texto.strip()
-    except (httpx.HTTPError, KeyError, IndexError, ValueError):
+        return texto
+    except httpx.HTTPStatusError as error:
         logger.warning("Gemini API returned HTTP status %s", error.response.status_code)
-        # Cuota agotada en Google, error de red, respuesta inesperada, etc.
-        # No propagamos el error: el router cae al chatbot de reglas.
+        return None
+    except (httpx.HTTPError, TypeError, ValueError) as error:
         logger.warning("Gemini request failed (%s)", type(error).__name__)
         return None

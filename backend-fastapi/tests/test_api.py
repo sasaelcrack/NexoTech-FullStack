@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 
 from app import auth, schemas
 from app.main import app
+from app.services import ia_service
 
 
 @pytest.fixture
@@ -91,3 +92,22 @@ def test_token_uses_current_role_and_rejects_inactive_user(monkeypatch):
     with pytest.raises(HTTPException) as error:
         auth.verificar_token(credentials, Database())
     assert error.value.status_code == 401
+
+
+def test_gemini_invalid_payload_falls_back_to_local_rules(monkeypatch):
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"candidates": [None]}
+
+    monkeypatch.setattr(ia_service, "_cuota_disponible", lambda: True)
+    monkeypatch.setattr(ia_service.os, "getenv", lambda key, default=None: {
+        "GEMINI_API_KEY": "test-key",
+        "GEMINI_MODEL": "gemini-2.5-flash-lite",
+        "CHATBOT_IA_MAX_TOKENS": "200",
+    }.get(key, default))
+    monkeypatch.setattr(ia_service.httpx, "post", lambda *args, **kwargs: FakeResponse())
+
+    assert ia_service.generar_respuesta_ia("hola") is None
