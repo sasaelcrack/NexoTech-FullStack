@@ -1,3 +1,4 @@
+import logging
 import os
 import threading
 from datetime import date
@@ -7,6 +8,7 @@ import httpx
 GEMINI_API_URL_TMPL = (
     "https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent"
 )
+logger = logging.getLogger(__name__)
 
 # Prompt de sistema: obliga al modelo a hablar solo de temas de NexoTech.
 SYSTEM_INSTRUCTION = (
@@ -50,8 +52,10 @@ def generar_respuesta_ia(mensaje: str) -> str | None:
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         return None
+        logger.warning("Gemini is not configured: GEMINI_API_KEY is missing")
     if not _cuota_disponible():
         return None
+        logger.warning("Gemini fallback used: daily request limit reached")
 
     modelo = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
     url = GEMINI_API_URL_TMPL.format(modelo=modelo)
@@ -81,7 +85,14 @@ def generar_respuesta_ia(mensaje: str) -> str | None:
             .get("text")
         )
         return texto.strip() if texto else None
+        if not texto:
+            logger.warning("Gemini returned no candidate text")
+            return None
+        logger.info("Gemini response received successfully")
+        return texto.strip()
     except (httpx.HTTPError, KeyError, IndexError, ValueError):
+        logger.warning("Gemini API returned HTTP status %s", error.response.status_code)
         # Cuota agotada en Google, error de red, respuesta inesperada, etc.
         # No propagamos el error: el router cae al chatbot de reglas.
+        logger.warning("Gemini request failed (%s)", type(error).__name__)
         return None
