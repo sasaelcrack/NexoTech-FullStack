@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { API_URL, authHeaders, getStoredSession } from "../config";
 import DashboardLayout from "../components/DashboardLayout";
 import ProductoImagen from "../components/ProductoImagen";
+import ConfirmDialog from "../components/ConfirmDialog";
 import TableControls from "../components/TableControls";
 import { IconBox, IconWrench, IconCart, IconReceipt, IconUser, IconMessage } from "../components/icons";
 
@@ -81,6 +82,7 @@ function Cliente() {
 
   const [carrito, setCarrito] = useState([]); // { tipo_item, id, nombre, precio, cantidad, stock }
   const sincronizacionCarrito = useRef(Promise.resolve());
+  const [confirmacion, setConfirmacion] = useState(null);
 
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState("");
@@ -315,6 +317,11 @@ function Cliente() {
   };
 
   const cambiarCantidad = (tipo_item, id, delta) => {
+    const itemActual = carrito.find((item) => item.tipo_item === tipo_item && item.id === id);
+    if (delta < 0 && itemActual?.cantidad === 1) {
+      solicitarQuitarDelCarrito(itemActual);
+      return;
+    }
     const siguiente = carrito
       .map((item) => {
         if (item.tipo_item !== tipo_item || item.id !== id) return item;
@@ -337,6 +344,35 @@ function Cliente() {
     setCarrito([]);
     guardarCarritoServidor([]);
     setMensajeCompra("Compra cancelada. No se creó ningún pedido ni pago.");
+  };
+
+  const solicitarQuitarDelCarrito = (item) => {
+    setConfirmacion({
+      title: "¿Quitar este artículo?",
+      description: `${item.nombre} se eliminará del carrito.`,
+      confirmLabel: "Quitar artículo",
+      danger: true,
+      onConfirm: () => quitarDelCarrito(item.tipo_item, item.id),
+    });
+  };
+
+  const solicitarCancelarCompra = () => {
+    setConfirmacion({
+      title: "¿Vaciar el carrito?",
+      description: "Se quitarán todos los artículos. Todavía no se ha creado una compra ni iniciado un pago.",
+      confirmLabel: "Vaciar carrito",
+      danger: true,
+      onConfirm: cancelarCompraEnCarrito,
+    });
+  };
+
+  const solicitarInicioPago = () => {
+    setConfirmacion({
+      title: "¿Continuar al pago?",
+      description: `El total estimado es ${formatoCOP(totalConIvaCarrito)}. Se registrará una compra pendiente, se reservará el inventario y continuarás en Stripe. La compra se confirma cuando Stripe aprueba el pago.`,
+      confirmLabel: "Ir a pagar",
+      onConfirm: confirmarCompra,
+    });
   };
 
   const guardarCarritoServidor = (items) => {
@@ -606,7 +642,7 @@ function Cliente() {
                         </td>
                         <td className="p-4 text-[#4ea1ff] font-medium">{formatoCOP(c.disponible === false ? 0 : c.precio * c.cantidad)}</td>
                         <td className="p-4">
-                          <button onClick={() => quitarDelCarrito(c.tipo_item, c.id)} className="px-3 py-1 rounded-md bg-red-500/10 hover:bg-red-500/20 text-xs text-red-400 cursor-pointer">Quitar</button>
+                          <button onClick={() => solicitarQuitarDelCarrito(c)} className="px-3 py-1 rounded-md bg-red-500/10 hover:bg-red-500/20 text-xs text-red-400 cursor-pointer">Quitar</button>
                         </td>
                       </tr>
                     ))}
@@ -622,10 +658,10 @@ function Cliente() {
                   <p className="text-xs text-gray-500">El total final se confirma al crear la venta.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <button onClick={cancelarCompraEnCarrito} disabled={procesandoCompra} className="px-4 py-2.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 disabled:opacity-50 text-red-300 text-sm font-medium cursor-pointer">
+                  <button onClick={solicitarCancelarCompra} disabled={procesandoCompra} className="px-4 py-2.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 disabled:opacity-50 text-red-300 text-sm font-medium cursor-pointer">
                     Cancelar compra
                   </button>
-                  <button onClick={confirmarCompra} disabled={procesandoCompra || hayItemsNoDisponibles} className="px-5 py-2.5 rounded-lg bg-[#4ea1ff] hover:bg-[#3a8fee] disabled:opacity-50 text-white text-sm font-medium cursor-pointer">
+                  <button onClick={solicitarInicioPago} disabled={procesandoCompra || hayItemsNoDisponibles} className="px-5 py-2.5 rounded-lg bg-[#4ea1ff] hover:bg-[#3a8fee] disabled:opacity-50 text-white text-sm font-medium cursor-pointer">
                     {procesandoCompra ? "Procesando..." : hayItemsNoDisponibles ? "Revisa el carrito" : "Confirmar compra"}
                   </button>
                 </div>
@@ -789,6 +825,16 @@ function Cliente() {
           </button>
         </div>
       )}
+      <ConfirmDialog
+        open={Boolean(confirmacion)}
+        {...confirmacion}
+        onCancel={() => setConfirmacion(null)}
+        onConfirm={async () => {
+          const accion = confirmacion?.onConfirm;
+          setConfirmacion(null);
+          await accion?.();
+        }}
+      />
     </DashboardLayout>
   );
 }
