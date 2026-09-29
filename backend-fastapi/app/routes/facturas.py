@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app import auth, models, schemas
 from app.database import get_db
-from app.utils.documentos import generar_pdf_tabla
+from app.utils.documentos import datos_empresa, generar_pdf_tabla
 
 
 router = APIRouter(prefix="/api/facturas", tags=["Facturas"])
@@ -111,7 +111,7 @@ def descargar_factura_pdf(
             ["Ítem", "Cantidad", "Precio", "Subtotal"],
             filas,
             metadata=[
-                ("Empresa", "NexoTech | Soluciones tecnológicas"),
+                *datos_empresa(),
                 ("Fecha", factura.fecha.strftime("%Y-%m-%d %H:%M") if factura.fecha else ""),
                 ("Venta", f"#{factura.venta_id}"),
                 ("Cliente", f"{cliente.nombre} {cliente.apellido}" if cliente else f"Cliente #{factura.cliente_id}"),

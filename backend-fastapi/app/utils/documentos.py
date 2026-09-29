@@ -1,7 +1,21 @@
 from io import BytesIO
+import os
 from xml.sax.saxutils import escape
 
 from app import models
+
+
+def datos_empresa() -> list[tuple[str, str]]:
+    def valor(variable: str, predeterminado: str) -> str:
+        return os.getenv(variable, "").strip() or predeterminado
+
+    return [
+        ("Empresa", valor("COMPANY_NAME", "NexoTech | Soluciones tecnológicas")),
+        ("NIT", valor("COMPANY_NIT", "Pendiente de configurar")),
+        ("Correo empresa", valor("COMPANY_EMAIL", "contacto@nexotech.com")),
+        ("Teléfono empresa", valor("COMPANY_PHONE", "+57 568 458 4215")),
+        ("Ubicación", valor("COMPANY_LOCATION", "Medellín, Colombia")),
+    ]
 
 
 def generar_excel_ventas(ventas, db):
@@ -24,8 +38,12 @@ def generar_excel_ventas(ventas, db):
     hoja["A2"] = "Soluciones tecnológicas | Valores expresados en pesos colombianos (COP)"
     hoja["A2"].font = Font(italic=True, color="666666")
     hoja["A2"].alignment = Alignment(horizontal="center")
+    hoja.merge_cells("A3:P3")
+    hoja["A3"] = " | ".join(f"{etiqueta}: {valor}" for etiqueta, valor in datos_empresa())
+    hoja["A3"].font = Font(size=9, color="666666")
+    hoja["A3"].alignment = Alignment(horizontal="left", vertical="center")
+    hoja.row_dimensions[3].height = 18
     encabezados = ["Venta", "Cliente", "Correo cliente", "Responsable", "Fecha", "Estado", "Tipo", "Ítem", "Cantidad", "Precio unitario (COP)", "Subtotal ítem (COP)", "Subtotal venta (COP)", "Descuento (COP)", "Base gravable (COP)", "IVA (19%)", "Total venta (COP)"]
-    hoja.append([])
     hoja.append(encabezados)
     for celda in hoja[4]:
         celda.font = Font(bold=True, color="FFFFFF")

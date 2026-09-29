@@ -1,3 +1,4 @@
+from io import BytesIO
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,11 +20,12 @@ from app.integrations.stripe_provider import CheckoutNoCancelableError, StripePr
 from app.main import app
 from app.routes import chatbot as chatbot_route
 from app.routes import carritos as carritos_route
+from app.routes import facturas as facturas_route
 from app.routes import productos as productos_route
 from app.routes import usuarios as usuarios_route
 from app.services import ia_service
 from app.services.payment_service import _linea_checkout, aplicar_estado_pago
-from app.utils.documentos import generar_excel_ventas, generar_pdf_tabla
+from app.utils.documentos import datos_empresa, generar_excel_ventas, generar_pdf_tabla
 
 
 @pytest.fixture
@@ -221,7 +223,8 @@ def test_cannot_delete_last_active_admin(client, monkeypatch):
     assert deleted == []
 
 
-def test_excel_report_stores_formula_like_item_names_as_text():
+def test_excel_report_stores_formula_like_item_names_as_text(monkeypatch):
+    monkeypatch.setenv("COMPANY_NIT", "900123456-7")
     sale = SimpleNamespace(
         id=4,
         cliente_id=7,
@@ -267,7 +270,72 @@ def test_excel_report_stores_formula_like_item_names_as_text():
     assert workbook["Ventas"]["N5"].value == 9000
     assert workbook["Ventas"]["O5"].value == 1710
     assert workbook["Ventas"]["P5"].value == 10710
+    assert "NIT: 900123456-7" in workbook["Ventas"]["A3"].value
+    assert "contacto@nexotech.com" in workbook["Ventas"]["A3"].value
+    assert "A1:P1" in {str(rango) for rango in workbook["Ventas"].merged_cells.ranges}
+    assert workbook["Ventas"]["A1"].fill.fgColor.rgb.endswith("1E40AF")
     assert workbook["Ventas"].freeze_panes == "A5"
+
+
+def test_company_invoice_details_never_invent_tax_id(monkeypatch):
+    monkeypatch.delenv("COMPANY_NIT", raising=False)
+
+    datos = dict(datos_empresa())
+
+    assert datos["NIT"] == "Pendiente de configurar"
+    assert datos["Correo empresa"] == "contacto@nexotech.com"
+
+
+def test_invoice_pdf_receives_company_details_in_existing_metadata(monkeypatch):
+    monkeypatch.delenv("COMPANY_NIT", raising=False)
+    customer = SimpleNamespace(nombre="Ana", apellido="Lopez", correo="ana@example.com")
+    invoice = SimpleNamespace(
+        id=2,
+        numero_factura="NXT-00000002",
+        venta_id=2,
+        cliente_id=7,
+        subtotal=10000,
+        descuento=0,
+        impuestos=1900,
+        total=11900,
+        estado="emitida",
+        fecha=None,
+        detalles=[],
+        venta=SimpleNamespace(usuario_id=None),
+    )
+    metadata_capturada = {}
+
+    class Query:
+        def __init__(self, result):
+            self.result = result
+
+        def filter(self, *_args):
+            return self
+
+        def first(self):
+            return self.result
+
+    class Database:
+        def query(self, model):
+            return Query(invoice if model is models.Factura else customer)
+
+    def capturar_pdf(*_args, **kwargs):
+        metadata_capturada["metadata"] = kwargs["metadata"]
+        return BytesIO(b"%PDF-test")
+
+    monkeypatch.setattr(facturas_route, "generar_pdf_tabla", capturar_pdf)
+
+    response = facturas_route.descargar_factura_pdf(
+        invoice.id,
+        db=Database(),
+        payload={"sub": "7", "rol_id": 3},
+    )
+
+    datos = dict(metadata_capturada["metadata"])
+    assert response.media_type == "application/pdf"
+    assert datos["NIT"] == "Pendiente de configurar"
+    assert datos["Correo empresa"] == "contacto@nexotech.com"
+    assert datos["Teléfono empresa"] == "+57 568 458 4215"
 
 
 def test_pdf_report_escapes_user_supplied_markup():

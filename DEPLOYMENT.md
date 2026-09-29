@@ -11,7 +11,14 @@ FRONTEND_URL=https://tu-frontend.example.com
 FRONTEND_ORIGINS=https://tu-frontend.example.com
 STRIPE_SUCCESS_URL=https://tu-frontend.example.com/cliente
 STRIPE_CANCEL_URL=https://tu-frontend.example.com/cliente
+COMPANY_NAME=NexoTech | Soluciones tecnológicas
+COMPANY_NIT=tu_nit_real
+COMPANY_EMAIL=contacto@nexotech.com
+COMPANY_PHONE=+57 568 458 4215
+COMPANY_LOCATION=Medellin, Colombia
 ```
+
+Los datos `COMPANY_*` aparecen en las facturas PDF y en la fila de identificación del reporte Excel. Configura `COMPANY_NIT` con el NIT legal real antes de emitir facturas; el valor de ejemplo no es un identificador válido.
 
 La API expone `GET /health`, útil para el health check del proveedor. Para levantar API y PostgreSQL con Docker:
 

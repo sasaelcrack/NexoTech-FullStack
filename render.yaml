@@ -71,6 +71,16 @@ services:
         sync: false
       - key: GEMINI_MODEL
         value: gemini-2.5-flash-lite
+      - key: COMPANY_NAME
+        value: "NexoTech | Soluciones tecnológicas"
+      - key: COMPANY_NIT
+        sync: false
+      - key: COMPANY_EMAIL
+        value: contacto@nexotech.com
+      - key: COMPANY_PHONE
+        value: "+57 568 458 4215"
+      - key: COMPANY_LOCATION
+        value: "Medellín, Colombia"
       - key: CHATBOT_IA_LIMITE_DIARIO
         value: "150"
       - key: CHATBOT_IA_MAX_TOKENS
