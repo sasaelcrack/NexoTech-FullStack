@@ -960,3 +960,27 @@ def test_gemini_invalid_payload_falls_back_to_local_rules(monkeypatch):
     monkeypatch.setattr(ia_service.httpx, "post", lambda *args, **kwargs: FakeResponse())
 
     assert ia_service.generar_respuesta_ia("hola") is None
+
+
+def test_gemini_request_uses_rest_camel_case_system_instruction(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"candidates": [{"content": {"parts": [{"text": "Hola desde Gemini"}]}}]}
+
+    monkeypatch.setattr(ia_service, "_cuota_disponible", lambda: True)
+    monkeypatch.setattr(ia_service.os, "getenv", lambda key, default=None: {
+        "GEMINI_API_KEY": "test-key",
+        "GEMINI_MODEL": "gemini-2.5-flash-lite",
+        "CHATBOT_IA_MAX_TOKENS": "200",
+    }.get(key, default))
+    monkeypatch.setattr(ia_service.httpx, "post", lambda *args, **kwargs: calls.append((args, kwargs)) or FakeResponse())
+
+    assert ia_service.generar_respuesta_ia("hola") == "Hola desde Gemini"
+    body = calls[0][1]["json"]
+    assert "systemInstruction" in body
+    assert "system_instruction" not in body

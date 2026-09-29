@@ -83,7 +83,7 @@ def generar_respuesta_ia(mensaje: str, contexto_catalogo: str = "") -> str | Non
         if contexto_catalogo:
             pregunta = f"Catálogo actual de NexoTech:\n{contexto_catalogo}\n\nPregunta del cliente:\n{mensaje}"
         body = {
-            "system_instruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
+            "systemInstruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
             "contents": [{"role": "user", "parts": [{"text": pregunta}]}],
             "generationConfig": {
                 "temperature": 0.4,
