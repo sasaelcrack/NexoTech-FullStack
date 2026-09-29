@@ -7,6 +7,7 @@ function RecoverPassword({ onBackToLogin }) {
   const [email, setEmail] = useState("");
   const [error, setError] = useState("");
   const [sent, setSent] = useState(false);
+  const [resetUrl, setResetUrl] = useState("");
   const [loading, setLoading] = useState(false);
 
   const validateEmail = (value) => {
@@ -24,6 +25,7 @@ function RecoverPassword({ onBackToLogin }) {
     setEmail(value);
     setError(validateEmail(value));
     setSent(false);
+    setResetUrl("");
   };
 
   const handleSubmit = async (e) => {
@@ -35,11 +37,12 @@ function RecoverPassword({ onBackToLogin }) {
 
     setLoading(true);
     try {
-      await apiRequest("/usuarios/recuperar", {
+      const { data } = await apiRequest("/usuarios/recuperar", {
         method: "POST",
         body: { correo: email },
       });
       setSent(true);
+      setResetUrl(data.reset_url || "");
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -68,9 +71,10 @@ function RecoverPassword({ onBackToLogin }) {
         />
 
         {sent && (
-          <p className="mb-4 rounded-xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-center text-sm text-emerald-300">
-            Si el correo existe, recibirás un enlace de recuperación.
-          </p>
+          <div className="mb-4 rounded-xl border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-center text-sm text-emerald-300">
+            <p>{resetUrl ? "Entorno local: ya puedes restablecer tu contraseña." : "Si el correo existe, recibirás un enlace de recuperación."}</p>
+            {resetUrl && <a href={resetUrl} className="mt-2 inline-block font-medium text-emerald-200 underline underline-offset-2">Abrir enlace de recuperación</a>}
+          </div>
         )}
 
         <Button type="submit" disabled={loading}>

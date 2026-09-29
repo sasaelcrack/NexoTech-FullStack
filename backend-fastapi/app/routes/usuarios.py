@@ -46,6 +46,13 @@ def enviar_correo_recuperacion(destinatario: str, enlace: str) -> None:
         servidor.send_message(mensaje)
 
 
+def enviar_correo_recuperacion_seguro(destinatario: str, enlace: str) -> None:
+    try:
+        enviar_correo_recuperacion(destinatario, enlace)
+    except (OSError, smtplib.SMTPException, RuntimeError, ValueError) as error:
+        logger.error("No fue posible enviar recuperación por correo (%s)", type(error).__name__)
+
+
 @router.post("/registro", response_model=schemas.UsuarioResponse)
 def registrar_usuario(
     usuario: schemas.UsuarioCreate,
@@ -125,16 +132,18 @@ def solicitar_recuperacion(
     ).update({"used_at": datetime.now(timezone.utc).replace(tzinfo=None)})
     db.add(models.PasswordResetToken(usuario_id=usuario.id, token_hash=token_hash, expires_at=expiracion))
 
-    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+    ambiente = os.getenv("ENVIRONMENT", "development").lower()
+    frontend_url = (
+        os.getenv("FRONTEND_URL", "http://localhost:5173")
+        if ambiente == "production"
+        else os.getenv("LOCAL_FRONTEND_URL", "http://localhost:5173")
+    )
     enlace = f"{frontend_url}/restablecer-password?token={token}"
     db.commit()
-    if background_tasks is not None:
-        background_tasks.add_task(enviar_correo_recuperacion, usuario.correo, enlace)
-    else:
-        try:
-            enviar_correo_recuperacion(usuario.correo, enlace)
-        except (OSError, smtplib.SMTPException, RuntimeError):
-            logger.warning("No fue posible enviar un correo de recuperación")
+    if ambiente != "production":
+        return {**mensaje_generico, "reset_url": enlace}
+
+    background_tasks.add_task(enviar_correo_recuperacion_seguro, usuario.correo, enlace)
     return mensaje_generico
 
 

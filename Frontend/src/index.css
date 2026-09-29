@@ -14,7 +14,19 @@
   --color-success: #54d69a;
   --color-warning: #f3c969;
   --color-danger: #ff7d8d;
+  color-scheme: dark;
+  scrollbar-color: rgba(78, 161, 255, .55) #101827;
+  scrollbar-width: thin;
 }
+
+*::-webkit-scrollbar { width: 9px; height: 9px; }
+*::-webkit-scrollbar-track { border-radius: 999px; background: #101827; }
+*::-webkit-scrollbar-thumb {
+  border: 2px solid #101827;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #4ea1ff, #356fae);
+}
+*::-webkit-scrollbar-thumb:hover { background: linear-gradient(180deg, #83c1ff, #4ea1ff); }
 
 .font-display { font-family: var(--font-display); }
 .font-sans { font-family: var(--font-sans); }

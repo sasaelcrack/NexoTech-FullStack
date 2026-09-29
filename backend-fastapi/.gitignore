@@ -12,3 +12,4 @@ __pycache__/
 # Logs y archivos locales
 *.log
 .DS_Store
+uploads/

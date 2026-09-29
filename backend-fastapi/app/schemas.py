@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
-from typing import Optional
+from typing import Literal, Optional
 from datetime import datetime
 
 
@@ -355,3 +355,4 @@ class ChatbotMensaje(BaseModel):
 
 class ChatbotRespuesta(BaseModel):
     respuesta: str
+    origen: Literal["gemini", "local"] = "local"

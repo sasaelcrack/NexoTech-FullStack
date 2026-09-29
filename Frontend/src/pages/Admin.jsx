@@ -686,7 +686,7 @@ function Admin() {
                     key={p.id}
                     className="border-b border-white/5 last:border-0 transition-colors hover:bg-[#4ea1ff]/[0.04]"
                   >
-                    <td className="p-4 font-medium text-white"><div className="flex items-center gap-3"><ProductoImagen src={p.imagen_url} nombre={p.nombre} className="h-10 w-10" /><span>{p.nombre}</span></div></td>
+                    <td className="p-4 font-medium text-white"><div className="flex min-w-64 items-center gap-3"><ProductoImagen src={p.imagen_url} nombre={p.nombre} className="h-14 w-14 rounded-xl border border-white/10 bg-[#101827] text-base" /><span className="max-w-64 whitespace-normal font-medium leading-5">{p.nombre}</span></div></td>
                     <td className="max-w-[18rem] p-4 text-gray-400"><span className="line-clamp-2">{p.descripcion || "Sin descripción"}</span></td>
                     <td className="p-4 font-semibold text-white">{formatoCOP(p.precio)}</td>
                     <td className="p-4">
@@ -825,7 +825,7 @@ function Admin() {
 
       {(editandoProducto || creandoProducto) && (
         <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/55 px-4 py-4 backdrop-blur-sm sm:items-center">
-          <div className="my-4 max-h-[calc(100vh-2rem)] w-full max-w-sm overflow-y-auto rounded-2xl border border-white/10 bg-[#1a1a26] p-6">
+          <div className="my-4 max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-2xl border border-white/10 bg-[#1a1a26] p-6">
             <h2 className="font-display text-xl font-semibold text-white mb-5">
               {creandoProducto ? "Nuevo producto" : "Editar producto"}
             </h2>
@@ -858,13 +858,21 @@ function Admin() {
                 nombre={formProducto.nombre}
                 className="mb-3 h-28 w-28 rounded-xl text-2xl"
               />
-              <input
-                id="producto-imagen"
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                onChange={seleccionarImagenProducto}
-                className="block w-full text-sm text-gray-300 file:mr-3 file:rounded-md file:border-0 file:bg-[#4ea1ff]/15 file:px-3 file:py-2 file:text-sm file:font-medium file:text-[#9bcaff] hover:file:bg-[#4ea1ff]/25"
-              />
+              <div className="flex min-w-0 items-center gap-3">
+                <input
+                  id="producto-imagen"
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={seleccionarImagenProducto}
+                  className="sr-only"
+                />
+                <label htmlFor="producto-imagen" className="shrink-0 cursor-pointer rounded-md border border-[#4ea1ff]/25 bg-[#4ea1ff]/10 px-3 py-2 text-sm font-medium text-[#9bcaff] transition hover:bg-[#4ea1ff]/20">
+                  Seleccionar foto
+                </label>
+                <span title={archivoImagenProducto?.name || ""} className="min-w-0 truncate text-sm text-gray-400">
+                  {archivoImagenProducto?.name || (imagenActualProducto && !quitarImagenProducto ? "Foto guardada" : "Ningún archivo seleccionado")}
+                </span>
+              </div>
               <p className="mt-1 text-xs text-gray-500">JPG, PNG o WebP. Máximo 5 MB.</p>
               {imagenActualProducto && !quitarImagenProducto && !archivoImagenProducto && (
                 <button type="button" onClick={() => setQuitarImagenProducto(true)} className="mt-2 text-sm text-red-300 hover:text-red-200">Quitar foto actual</button>

@@ -1,5 +1,7 @@
 import os
 from io import BytesIO
+from pathlib import Path
+import re
 
 import cloudinary
 import cloudinary.uploader
@@ -7,6 +9,7 @@ from cloudinary.exceptions import Error as CloudinaryError
 
 
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
+LOCAL_IMAGE_ROOT = Path(__file__).resolve().parents[2] / "uploads" / "products"
 IMAGE_SIGNATURES = {
     "image/jpeg": ("jpg", lambda content: content.startswith(b"\xff\xd8\xff")),
     "image/png": ("png", lambda content: content.startswith(b"\x89PNG\r\n\x1a\n")),
@@ -40,7 +43,30 @@ def _configurar_cloudinary() -> None:
     cloudinary.config(cloud_name=cloud_name, api_key=api_key, api_secret=api_secret, secure=True)
 
 
+def _usar_almacenamiento_local() -> bool:
+    return os.getenv("ENVIRONMENT", "development").lower() != "production" and not all(
+        os.getenv(key) for key in ("CLOUDINARY_CLOUD_NAME", "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET")
+    )
+
+
+def _ruta_imagen_local(public_id: str) -> Path:
+    match = re.fullmatch(r"local:productos/(producto-\d+\.(?:jpg|png|webp))", public_id)
+    if not match:
+        raise ImageStorageError("Identificador local de imagen inválido")
+    return LOCAL_IMAGE_ROOT / match.group(1)
+
+
 def subir_imagen_producto(producto_id: int, content: bytes, image_format: str) -> dict[str, str]:
+    if _usar_almacenamiento_local():
+        LOCAL_IMAGE_ROOT.mkdir(parents=True, exist_ok=True)
+        public_id = f"local:productos/producto-{producto_id}.{image_format}"
+        _ruta_imagen_local(public_id).write_bytes(content)
+        api_url = os.getenv("LOCAL_API_URL", "http://127.0.0.1:8000").rstrip("/")
+        return {
+            "url": f"{api_url}/media/products/producto-{producto_id}.{image_format}",
+            "public_id": public_id,
+        }
+
     _configurar_cloudinary()
     try:
         result = cloudinary.uploader.upload(
@@ -62,6 +88,12 @@ def subir_imagen_producto(producto_id: int, content: bytes, image_format: str) -
 
 
 def eliminar_imagen_producto(public_id: str) -> None:
+    if public_id.startswith("local:"):
+        path = _ruta_imagen_local(public_id)
+        if path.exists():
+            path.unlink()
+        return
+
     _configurar_cloudinary()
     try:
         result = cloudinary.uploader.destroy(public_id, invalidate=True, resource_type="image")

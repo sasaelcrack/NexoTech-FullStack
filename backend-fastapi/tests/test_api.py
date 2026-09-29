@@ -13,10 +13,13 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 
 from app import auth, models, schemas
 from app.database import get_db
-from app.integrations.cloudinary_images import MAX_IMAGE_BYTES, validar_imagen
+from app.integrations import cloudinary_images
+from app.integrations.cloudinary_images import ImageStorageNotConfigured, MAX_IMAGE_BYTES, subir_imagen_producto, validar_imagen
 from app.integrations.stripe_provider import CheckoutNoCancelableError, StripeProvider
 from app.main import app
+from app.routes import chatbot as chatbot_route
 from app.routes import productos as productos_route
+from app.routes import usuarios as usuarios_route
 from app.services import ia_service
 from app.services.payment_service import _linea_checkout
 from app.utils.documentos import generar_excel_ventas, generar_pdf_tabla
@@ -276,6 +279,18 @@ def test_product_image_validation_checks_real_file_signature_and_size():
         validar_imagen("image/png", png_header + b"x" * MAX_IMAGE_BYTES)
 
 
+def test_production_does_not_fall_back_to_ephemeral_local_image_storage(monkeypatch, tmp_path):
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    for key in ("CLOUDINARY_CLOUD_NAME", "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(cloudinary_images, "LOCAL_IMAGE_ROOT", tmp_path)
+
+    with pytest.raises(ImageStorageNotConfigured):
+        subir_imagen_producto(2, b"\x89PNG\r\n\x1a\n", "png")
+
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_employee_cannot_upload_product_image(client, monkeypatch):
     product = SimpleNamespace(id=2)
 
@@ -393,6 +408,68 @@ def test_admin_removing_product_image_deletes_remote_asset_and_clears_database(c
     assert response.json()["imagen_url"] is None
     assert deleted_ids == ["nexotech/productos/producto-2"]
     assert product.imagen_public_id is None
+
+
+def test_local_image_upload_works_without_cloudinary_and_serves_then_removes_file(client, monkeypatch):
+    product = SimpleNamespace(
+        id=2,
+        nombre="Equipo de prueba local",
+        descripcion="Producto para validar imagen",
+        precio=1500000,
+        stock=3,
+        estado="activo",
+        fecha_creacion=None,
+        imagen_url=None,
+        imagen_public_id=None,
+    )
+
+    class Query:
+        def filter(self, *_args):
+            return self
+
+        def first(self):
+            return product
+
+    class Database:
+        def query(self, _model):
+            return Query()
+
+        def commit(self):
+            return None
+
+        def refresh(self, _instance):
+            return None
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("LOCAL_API_URL", "http://testserver")
+    for key in ("CLOUDINARY_CLOUD_NAME", "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET"):
+        monkeypatch.delenv(key, raising=False)
+    image_path = cloudinary_images.LOCAL_IMAGE_ROOT / "producto-2.png"
+    if image_path.exists():
+        image_path.unlink()
+    monkeypatch.setitem(app.dependency_overrides, get_db, lambda: Database())
+    monkeypatch.setitem(app.dependency_overrides, auth.verificar_token, lambda: {"sub": "1", "rol_id": 1})
+
+    try:
+        uploaded = client.post(
+            "/api/productos/2/imagen",
+            files={"imagen": ("producto.png", b"\x89PNG\r\n\x1a\n", "image/png")},
+        )
+        image = client.get("/media/products/producto-2.png")
+        previous_image_url = client.get("/media/productos/producto-2.png")
+        removed = client.delete("/api/productos/2/imagen")
+
+        assert uploaded.status_code == 200
+        assert uploaded.json()["imagen_url"] == "http://testserver/media/products/producto-2.png"
+        assert image.status_code == 200
+        assert previous_image_url.status_code == 200
+        assert image.content == b"\x89PNG\r\n\x1a\n"
+        assert removed.status_code == 200
+        assert product.imagen_url is None
+        assert not image_path.exists()
+    finally:
+        if image_path.exists():
+            image_path.unlink()
 
 
 @pytest.mark.parametrize("checkout_open", [True, False])
@@ -557,6 +634,119 @@ def test_password_policy_applies_to_registration_and_reset():
 
     with pytest.raises(ValueError):
         schemas.RestablecerPasswordRequest(token="a" * 32, password="solamente-minusculas")
+
+
+def test_local_password_recovery_returns_working_single_use_reset_link(client, monkeypatch):
+    user = SimpleNamespace(id=14, correo="cliente@example.com", password_hash="old-hash")
+    reset_records = []
+    commits = []
+
+    class Query:
+        def __init__(self, model):
+            self.model = model
+
+        def filter(self, *_args):
+            return self
+
+        def update(self, values):
+            for record in reset_records:
+                if record.used_at is None:
+                    record.used_at = values["used_at"]
+            return len(reset_records)
+
+        def first(self):
+            if self.model is models.Usuario:
+                return user
+            if reset_records and reset_records[-1].used_at is None:
+                return reset_records[-1]
+            return None
+
+    class Database:
+        def query(self, model):
+            return Query(model)
+
+        def add(self, record):
+            reset_records.append(record)
+
+        def commit(self):
+            commits.append(True)
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("LOCAL_FRONTEND_URL", "http://localhost:5173")
+    monkeypatch.delenv("SMTP_HOST", raising=False)
+    monkeypatch.setitem(app.dependency_overrides, get_db, lambda: Database())
+    monkeypatch.setitem(app.dependency_overrides, auth.limitar_solicitudes, lambda: None)
+    monkeypatch.setattr(auth, "hashear_password", lambda password: f"hashed:{password}")
+    monkeypatch.setattr(auth, "verificar_password", lambda password, stored_hash: stored_hash == f"hashed:{password}")
+
+    recovery = client.post("/api/usuarios/recuperar", json={"correo": user.correo})
+    reset_url = recovery.json()["reset_url"]
+    token = reset_url.split("token=", 1)[1]
+    response = client.post(
+        "/api/usuarios/restablecer",
+        json={"token": token, "password": "NuevaClave123"},
+    )
+    token_reuse = client.post(
+        "/api/usuarios/restablecer",
+        json={"token": token, "password": "OtraClave123"},
+    )
+
+    assert recovery.status_code == 200
+    assert reset_url.startswith("http://localhost:5173/restablecer-password?token=")
+    assert response.status_code == 200
+    assert user.password_hash == "hashed:NuevaClave123"
+    assert token_reuse.status_code == 400
+    assert len(commits) == 2
+
+
+def test_chatbot_local_fallback_uses_the_live_product_catalog(client, monkeypatch):
+    product = SimpleNamespace(
+        id=5,
+        nombre="Equipo de trabajo demo",
+        descripcion="Configurado para productividad",
+        precio=1500000,
+        stock=4,
+        estado="activo",
+    )
+    service = SimpleNamespace(
+        id=8,
+        nombre="Configuración profesional",
+        descripcion="Configuración inicial",
+        precio=80000,
+        estado="activo",
+    )
+
+    class Query:
+        def __init__(self, result):
+            self.result = result
+
+        def filter(self, *_args):
+            return self
+
+        def order_by(self, *_args):
+            return self
+
+        def limit(self, _limit):
+            return self
+
+        def all(self):
+            return self.result
+
+    class Database:
+        def query(self, model):
+            return Query([product] if model is models.Producto else [service])
+
+    monkeypatch.setitem(app.dependency_overrides, get_db, lambda: Database())
+    monkeypatch.setitem(app.dependency_overrides, auth.limitar_solicitudes, lambda: None)
+    monkeypatch.setattr(chatbot_route, "generar_respuesta_ia", lambda _mensaje, _contexto: None)
+
+    response = client.post("/api/chatbot/mensaje", json={"mensaje": "¿Qué productos y servicios tienen?"})
+
+    assert response.status_code == 200
+    assert response.json()["origen"] == "local"
+    assert "Equipo de trabajo demo" in response.json()["respuesta"]
+    assert "Configuración profesional" in response.json()["respuesta"]
+    assert "4 disponibles" in response.json()["respuesta"]
 
 
 def test_token_uses_current_role_and_rejects_inactive_user(monkeypatch):

@@ -54,7 +54,7 @@ CLOUDINARY_API_KEY=tu_api_key
 CLOUDINARY_API_SECRET=tu_api_secret
 ```
 
-El secreto solo se usa en FastAPI y no debe añadirse al frontend ni al repositorio. La carga está limitada a imágenes JPG, PNG o WebP de hasta 5 MB y solo el admin puede subirlas o quitarlas. La migración de imagen se ejecuta junto con `alembic upgrade head`; los productos existentes conservan sus datos y muestran la inicial hasta que se les cargue una foto.
+El secreto solo se usa en FastAPI y no debe añadirse al frontend ni al repositorio. La carga está limitada a imágenes JPG, PNG o WebP de hasta 5 MB y solo el admin puede subirlas o quitarlas. La migración de imagen se ejecuta junto con `alembic upgrade head`; los productos existentes conservan sus datos y muestran la inicial hasta que se les cargue una foto. En desarrollo local, si Cloudinary no está configurado, se usa `backend-fastapi/uploads/` (ignorado por Git); ese almacenamiento local no se activa en producción porque Render no garantiza persistencia del disco del contenedor.
 
 ## Chatbot Gemini
 
