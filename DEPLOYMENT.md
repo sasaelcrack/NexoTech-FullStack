@@ -44,6 +44,18 @@ https://tu-api.example.com/api/v1/webhooks/stripe
 
 Guarda el secreto de firma entregado por Stripe en `STRIPE_WEBHOOK_SECRET`. Usa llaves `sk_live_` y `pk_live_` únicamente cuando el proyecto esté listo para producción.
 
+## Imágenes de productos
+
+Las fotos se almacenan en Cloudinary; PostgreSQL guarda únicamente la URL y el identificador del archivo. Configura estas variables en el backend local y en el servicio `nexotech-api` de Render:
+
+```env
+CLOUDINARY_CLOUD_NAME=tu_cloud_name
+CLOUDINARY_API_KEY=tu_api_key
+CLOUDINARY_API_SECRET=tu_api_secret
+```
+
+El secreto solo se usa en FastAPI y no debe añadirse al frontend ni al repositorio. La carga está limitada a imágenes JPG, PNG o WebP de hasta 5 MB y solo el admin puede subirlas o quitarlas. La migración de imagen se ejecuta junto con `alembic upgrade head`; los productos existentes conservan sus datos y muestran la inicial hasta que se les cargue una foto.
+
 ## Chatbot Gemini
 
 Guarda la clave de Gemini únicamente en el `.env` del backend. El navegador nunca debe recibirla:
@@ -66,5 +78,6 @@ El archivo `render.yaml` crea la base PostgreSQL, la API FastAPI y el frontend R
 4. En `nexotech-frontend`, configura `VITE_API_URL` con la URL de la API terminada en `/api`.
 5. Despliega de nuevo el frontend después de guardar esa variable, porque se incorpora durante el build.
 6. Configura en Stripe el webhook `https://<api>/api/v1/webhooks/stripe` y guarda su secreto en `STRIPE_WEBHOOK_SECRET`.
+7. Añade `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` y `CLOUDINARY_API_SECRET` al servicio `nexotech-api` para habilitar las fotos de productos.
 
 La migración `alembic upgrade head` se ejecuta automáticamente al iniciar el contenedor de la API. No subas `.env`, contraseñas ni llaves privadas al repositorio.

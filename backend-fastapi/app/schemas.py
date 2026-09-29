@@ -129,6 +129,7 @@ class ProductoBase(BaseModel):
 class ProductoResponse(ProductoBase):
     id: int
     fecha_creacion: Optional[datetime] = None
+    imagen_url: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

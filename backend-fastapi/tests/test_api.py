@@ -13,8 +13,10 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 
 from app import auth, models, schemas
 from app.database import get_db
+from app.integrations.cloudinary_images import MAX_IMAGE_BYTES, validar_imagen
 from app.integrations.stripe_provider import CheckoutNoCancelableError, StripeProvider
 from app.main import app
+from app.routes import productos as productos_route
 from app.services import ia_service
 from app.services.payment_service import _linea_checkout
 from app.utils.documentos import generar_excel_ventas, generar_pdf_tabla
@@ -262,6 +264,135 @@ def test_pdf_report_escapes_user_supplied_markup():
     )
 
     assert report.read(4) == b"%PDF"
+
+
+def test_product_image_validation_checks_real_file_signature_and_size():
+    png_header = b"\x89PNG\r\n\x1a\n"
+
+    assert validar_imagen("image/png", png_header) == "png"
+    with pytest.raises(ValueError, match="válida"):
+        validar_imagen("image/png", b"not an image")
+    with pytest.raises(ValueError, match="5 MB"):
+        validar_imagen("image/png", png_header + b"x" * MAX_IMAGE_BYTES)
+
+
+def test_employee_cannot_upload_product_image(client, monkeypatch):
+    product = SimpleNamespace(id=2)
+
+    class Query:
+        def filter(self, *_args):
+            return self
+
+        def first(self):
+            return product
+
+    class Database:
+        def query(self, _model):
+            return Query()
+
+    monkeypatch.setitem(app.dependency_overrides, get_db, lambda: Database())
+    monkeypatch.setitem(app.dependency_overrides, auth.verificar_token, lambda: {"sub": "8", "rol_id": 2})
+
+    response = client.post(
+        "/api/productos/2/imagen",
+        files={"imagen": ("producto.png", b"\x89PNG\r\n\x1a\n", "image/png")},
+    )
+
+    assert response.status_code == 403
+
+
+def test_admin_upload_persists_product_image_url(client, monkeypatch):
+    product = SimpleNamespace(
+        id=2,
+        nombre="Equipo de trabajo",
+        descripcion="Equipo configurado",
+        precio=1500000,
+        stock=3,
+        estado="activo",
+        fecha_creacion=None,
+        imagen_url=None,
+        imagen_public_id=None,
+    )
+
+    class Query:
+        def filter(self, *_args):
+            return self
+
+        def first(self):
+            return product
+
+    class Database:
+        def query(self, _model):
+            return Query()
+
+        def commit(self):
+            return None
+
+        def refresh(self, _instance):
+            return None
+
+    monkeypatch.setitem(app.dependency_overrides, get_db, lambda: Database())
+    monkeypatch.setitem(app.dependency_overrides, auth.verificar_token, lambda: {"sub": "1", "rol_id": 1})
+    monkeypatch.setattr(
+        productos_route,
+        "subir_imagen_producto",
+        lambda _product_id, _content, _format: {
+            "url": "https://res.cloudinary.com/demo/image/upload/producto-2.png",
+            "public_id": "nexotech/productos/producto-2",
+        },
+    )
+
+    response = client.post(
+        "/api/productos/2/imagen",
+        files={"imagen": ("producto.png", b"\x89PNG\r\n\x1a\n", "image/png")},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["imagen_url"].startswith("https://res.cloudinary.com/")
+    assert product.imagen_public_id == "nexotech/productos/producto-2"
+
+
+def test_admin_removing_product_image_deletes_remote_asset_and_clears_database(client, monkeypatch):
+    product = SimpleNamespace(
+        id=2,
+        nombre="Equipo de trabajo",
+        descripcion="Equipo configurado",
+        precio=1500000,
+        stock=3,
+        estado="activo",
+        fecha_creacion=None,
+        imagen_url="https://res.cloudinary.com/demo/image/upload/producto-2.png",
+        imagen_public_id="nexotech/productos/producto-2",
+    )
+    deleted_ids = []
+
+    class Query:
+        def filter(self, *_args):
+            return self
+
+        def first(self):
+            return product
+
+    class Database:
+        def query(self, _model):
+            return Query()
+
+        def commit(self):
+            return None
+
+        def refresh(self, _instance):
+            return None
+
+    monkeypatch.setitem(app.dependency_overrides, get_db, lambda: Database())
+    monkeypatch.setitem(app.dependency_overrides, auth.verificar_token, lambda: {"sub": "1", "rol_id": 1})
+    monkeypatch.setattr(productos_route, "eliminar_imagen_producto", deleted_ids.append)
+
+    response = client.delete("/api/productos/2/imagen")
+
+    assert response.status_code == 200
+    assert response.json()["imagen_url"] is None
+    assert deleted_ids == ["nexotech/productos/producto-2"]
+    assert product.imagen_public_id is None
 
 
 @pytest.mark.parametrize("checkout_open", [True, False])

@@ -5,6 +5,7 @@ import SupportInbox from "../components/SupportInbox";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Toast from "../components/Toast";
 import TableControls from "../components/TableControls";
+import ProductoImagen from "../components/ProductoImagen";
 import { IconBox, IconWrench, IconMessage, IconGrid, IconReceipt, IconEdit, IconPower, IconTrash } from "../components/icons";
 
 const menu = [
@@ -337,7 +338,7 @@ function Empleado() {
                 <tbody>
                   {productosVisibles.map((p) => (
                     <tr key={p.id} className="border-b border-white/5 last:border-0 transition-colors hover:bg-[#4ea1ff]/[0.04]">
-                      <td className="p-4 font-medium text-white"><div className="flex items-center gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#4ea1ff]/10 text-sm font-semibold text-[#78b9ff]">{p.nombre.slice(0, 1).toUpperCase()}</span><span>{p.nombre}</span></div></td>
+                      <td className="p-4 font-medium text-white"><div className="flex items-center gap-3"><ProductoImagen src={p.imagen_url} nombre={p.nombre} className="h-10 w-10" /><span>{p.nombre}</span></div></td>
                       <td className="max-w-[18rem] p-4 text-gray-400"><span className="line-clamp-2">{p.descripcion || "Sin descripción"}</span></td>
                       <td className="p-4 font-semibold text-white">{formatoCOP(p.precio)}</td>
                       <td className="p-4"><span className={`inline-flex min-w-16 justify-center rounded-full border px-2.5 py-1 text-xs font-medium ${p.stock <= 5 ? "border-yellow-400/30 bg-yellow-400/10 text-yellow-300" : "border-white/10 bg-white/5 text-gray-300"}`}>{p.stock} unidades</span>

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { API_URL, authHeaders, getStoredSession } from "../config";
 import DashboardLayout from "../components/DashboardLayout";
+import ProductoImagen from "../components/ProductoImagen";
 import TableControls from "../components/TableControls";
 import { IconBox, IconWrench, IconCart, IconReceipt, IconUser, IconMessage } from "../components/icons";
 
@@ -478,7 +479,7 @@ function Cliente() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {productos.map((p) => (
               <div key={p.id} className="nt-card group flex flex-col p-5 transition hover:-translate-y-1 hover:border-[#4ea1ff]/35">
-                <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-[#4ea1ff]/15 text-lg font-semibold text-[#8ac7ff]">{p.nombre.slice(0, 1).toUpperCase()}</div>
+                <ProductoImagen src={p.imagen_url} nombre={p.nombre} className="mb-4 aspect-[4/3] w-full rounded-xl text-4xl" />
                 <h3 className="font-display font-semibold text-white">{p.nombre}</h3>
                 <p className="text-gray-500 text-sm mt-1 mb-3 flex-1">{p.descripcion}</p>
                 <p className="nt-tabular text-lg font-semibold text-[#8ac7ff]">{formatoCOP(p.precio)}</p>

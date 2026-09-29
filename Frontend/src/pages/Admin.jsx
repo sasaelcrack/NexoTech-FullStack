@@ -6,6 +6,7 @@ import SupportInbox from "../components/SupportInbox";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Toast from "../components/Toast";
 import TableControls from "../components/TableControls";
+import ProductoImagen from "../components/ProductoImagen";
 import { IconGrid, IconUsers, IconBox, IconWrench, IconMessage, IconReceipt, IconEdit, IconPower, IconTrash } from "../components/icons";
 
 const menu = [
@@ -47,6 +48,11 @@ function Admin() {
   const [editandoProducto, setEditandoProducto] = useState(null);
   const [creandoProducto, setCreandoProducto] = useState(false);
   const [formProducto, setFormProducto] = useState({ nombre: "", descripcion: "", precio: "", stock: "" });
+  const [imagenActualProducto, setImagenActualProducto] = useState("");
+  const [archivoImagenProducto, setArchivoImagenProducto] = useState(null);
+  const [vistaPreviaImagenProducto, setVistaPreviaImagenProducto] = useState("");
+  const [quitarImagenProducto, setQuitarImagenProducto] = useState(false);
+  const [guardandoImagenProducto, setGuardandoImagenProducto] = useState(false);
   const [editandoServicio, setEditandoServicio] = useState(null);
   const [creandoServicio, setCreandoServicio] = useState(false);
   const [formServicio, setFormServicio] = useState({ nombre: "", descripcion: "", precio: "" });
@@ -254,6 +260,10 @@ function Admin() {
 
   const abrirCreacionProducto = () => {
     setFormProducto({ nombre: "", descripcion: "", precio: "", stock: "" });
+    setImagenActualProducto("");
+    setArchivoImagenProducto(null);
+    setVistaPreviaImagenProducto("");
+    setQuitarImagenProducto(false);
     setCreandoProducto(true);
   };
 
@@ -265,11 +275,37 @@ function Admin() {
       precio: p.precio,
       stock: p.stock,
     });
+    setImagenActualProducto(p.imagen_url || "");
+    setArchivoImagenProducto(null);
+    setVistaPreviaImagenProducto("");
+    setQuitarImagenProducto(false);
   };
 
   const cerrarModalProducto = () => {
     setEditandoProducto(null);
     setCreandoProducto(false);
+    setImagenActualProducto("");
+    setArchivoImagenProducto(null);
+    setVistaPreviaImagenProducto("");
+    setQuitarImagenProducto(false);
+  };
+
+  const seleccionarImagenProducto = (event) => {
+    const archivo = event.target.files?.[0] || null;
+    if (archivo && archivo.size > 5 * 1024 * 1024) {
+      setNotificacion({ type: "error", message: "La imagen no puede superar los 5 MB." });
+      event.target.value = "";
+      return;
+    }
+    setArchivoImagenProducto(archivo);
+    setQuitarImagenProducto(false);
+    if (!archivo) {
+      setVistaPreviaImagenProducto("");
+      return;
+    }
+    const lector = new FileReader();
+    lector.onload = () => setVistaPreviaImagenProducto(typeof lector.result === "string" ? lector.result : "");
+    lector.readAsDataURL(archivo);
   };
 
   const guardarProducto = async () => {
@@ -281,6 +317,7 @@ function Admin() {
     }
     const esCreacion = creandoProducto;
     const url = esCreacion ? `${API_URL}/productos/` : `${API_URL}/productos/${editandoProducto}`;
+    setGuardandoImagenProducto(true);
     try {
       const res = await fetch(url, {
         method: esCreacion ? "POST" : "PUT",
@@ -289,10 +326,35 @@ function Admin() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Error al guardar producto");
+      const productoId = esCreacion ? data.id : editandoProducto;
+      if (esCreacion) {
+        setCreandoProducto(false);
+        setEditandoProducto(productoId);
+      }
+      if (archivoImagenProducto) {
+        const formData = new FormData();
+        formData.append("imagen", archivoImagenProducto);
+        const respuestaImagen = await fetch(`${API_URL}/productos/${productoId}/imagen`, {
+          method: "POST",
+          headers: authHeaders(token),
+          body: formData,
+        });
+        const datosImagen = await respuestaImagen.json();
+        if (!respuestaImagen.ok) throw new Error(datosImagen.detail || "No se pudo subir la foto del producto");
+      } else if (quitarImagenProducto && imagenActualProducto) {
+        const respuestaImagen = await fetch(`${API_URL}/productos/${productoId}/imagen`, {
+          method: "DELETE",
+          headers: authHeaders(token),
+        });
+        const datosImagen = await respuestaImagen.json();
+        if (!respuestaImagen.ok) throw new Error(datosImagen.detail || "No se pudo quitar la foto del producto");
+      }
       cerrarModalProducto();
       cargarProductos();
     } catch (err) {
       setNotificacion({ type: "error", message: err.message });
+    } finally {
+      setGuardandoImagenProducto(false);
     }
   };
 
@@ -624,7 +686,7 @@ function Admin() {
                     key={p.id}
                     className="border-b border-white/5 last:border-0 transition-colors hover:bg-[#4ea1ff]/[0.04]"
                   >
-                    <td className="p-4 font-medium text-white"><div className="flex items-center gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#4ea1ff]/10 text-sm font-semibold text-[#78b9ff]">{p.nombre.slice(0, 1).toUpperCase()}</span><span>{p.nombre}</span></div></td>
+                    <td className="p-4 font-medium text-white"><div className="flex items-center gap-3"><ProductoImagen src={p.imagen_url} nombre={p.nombre} className="h-10 w-10" /><span>{p.nombre}</span></div></td>
                     <td className="max-w-[18rem] p-4 text-gray-400"><span className="line-clamp-2">{p.descripcion || "Sin descripción"}</span></td>
                     <td className="p-4 font-semibold text-white">{formatoCOP(p.precio)}</td>
                     <td className="p-4">
@@ -789,6 +851,29 @@ function Admin() {
               />
             </div>
 
+            <div className="mb-4">
+              <label htmlFor="producto-imagen" className="mb-2 block text-sm text-gray-400">Foto del producto</label>
+              <ProductoImagen
+                src={archivoImagenProducto ? vistaPreviaImagenProducto : quitarImagenProducto ? "" : imagenActualProducto}
+                nombre={formProducto.nombre}
+                className="mb-3 h-28 w-28 rounded-xl text-2xl"
+              />
+              <input
+                id="producto-imagen"
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={seleccionarImagenProducto}
+                className="block w-full text-sm text-gray-300 file:mr-3 file:rounded-md file:border-0 file:bg-[#4ea1ff]/15 file:px-3 file:py-2 file:text-sm file:font-medium file:text-[#9bcaff] hover:file:bg-[#4ea1ff]/25"
+              />
+              <p className="mt-1 text-xs text-gray-500">JPG, PNG o WebP. Máximo 5 MB.</p>
+              {imagenActualProducto && !quitarImagenProducto && !archivoImagenProducto && (
+                <button type="button" onClick={() => setQuitarImagenProducto(true)} className="mt-2 text-sm text-red-300 hover:text-red-200">Quitar foto actual</button>
+              )}
+              {quitarImagenProducto && (
+                <button type="button" onClick={() => setQuitarImagenProducto(false)} className="mt-2 text-sm text-[#9bcaff] hover:text-white">Conservar foto actual</button>
+              )}
+            </div>
+
             <div className="mb-3">
               <label className="block text-sm text-gray-400 mb-1">Precio</label>
                 <input
@@ -813,8 +898,8 @@ function Admin() {
             </div>
 
             <div className="flex gap-3">
-              <button onClick={guardarProducto} className="flex-1 py-2 rounded-lg bg-[#4ea1ff] hover:bg-[#3a8fee] text-white font-medium cursor-pointer">
-                Guardar
+              <button onClick={guardarProducto} disabled={guardandoImagenProducto} className="flex-1 py-2 rounded-lg bg-[#4ea1ff] hover:bg-[#3a8fee] text-white font-medium cursor-pointer disabled:cursor-wait disabled:opacity-60">
+                {guardandoImagenProducto ? "Guardando..." : "Guardar"}
               </button>
               <button onClick={cerrarModalProducto} className="flex-1 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white cursor-pointer">
                 Cancelar

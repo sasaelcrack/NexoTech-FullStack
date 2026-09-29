@@ -1,10 +1,21 @@
-from fastapi import APIRouter, Depends, HTTPException
+import logging
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app import models, schemas, auth
+from app.integrations.cloudinary_images import (
+    ImageStorageError,
+    ImageStorageNotConfigured,
+    MAX_IMAGE_BYTES,
+    eliminar_imagen_producto,
+    subir_imagen_producto,
+    validar_imagen,
+)
 
 
 router = APIRouter(prefix="/api/productos", tags=["Productos"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("/", response_model=list[schemas.ProductoResponse])
@@ -25,6 +36,63 @@ def obtener_producto(producto_id: int, db: Session = Depends(get_db)):
     ).first()
     if not item:
         raise HTTPException(status_code=404, detail="Producto no encontrado")
+    return item
+
+
+@router.post("/{producto_id}/imagen", response_model=schemas.ProductoResponse)
+async def cargar_imagen_producto(
+    producto_id: int,
+    imagen: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _payload: dict = Depends(auth.verificar_rol(1)),
+):
+    item = db.query(models.Producto).filter(models.Producto.id == producto_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+
+    content = await imagen.read(MAX_IMAGE_BYTES + 1)
+    try:
+        image_format = validar_imagen(imagen.content_type, content)
+        stored_image = subir_imagen_producto(producto_id, content, image_format)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except ImageStorageNotConfigured as error:
+        raise HTTPException(status_code=503, detail="Configura Cloudinary en el backend para subir imágenes") from error
+    except ImageStorageError as error:
+        logger.warning("Cloudinary product image upload failed for product %s", producto_id)
+        raise HTTPException(status_code=502, detail="No fue posible guardar la imagen del producto") from error
+
+    item.imagen_url = stored_image["url"]
+    item.imagen_public_id = stored_image["public_id"]
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.delete("/{producto_id}/imagen", response_model=schemas.ProductoResponse)
+def quitar_imagen_producto(
+    producto_id: int,
+    db: Session = Depends(get_db),
+    _payload: dict = Depends(auth.verificar_rol(1)),
+):
+    item = db.query(models.Producto).filter(models.Producto.id == producto_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+    if not item.imagen_public_id:
+        return item
+
+    try:
+        eliminar_imagen_producto(item.imagen_public_id)
+    except ImageStorageNotConfigured as error:
+        raise HTTPException(status_code=503, detail="Configura Cloudinary en el backend para quitar imágenes") from error
+    except ImageStorageError as error:
+        logger.warning("Cloudinary product image deletion failed for product %s", producto_id)
+        raise HTTPException(status_code=502, detail="No fue posible quitar la imagen del producto") from error
+
+    item.imagen_url = None
+    item.imagen_public_id = None
+    db.commit()
+    db.refresh(item)
     return item
 
 @router.post("/", response_model=schemas.ProductoResponse)
@@ -86,6 +154,14 @@ def eliminar_producto(producto_id: int, db: Session = Depends(get_db), payload: 
                 "Cambia su estado a inactivo para conservar el historial."
             ),
         )
+
+    if item.imagen_public_id:
+        try:
+            eliminar_imagen_producto(item.imagen_public_id)
+        except ImageStorageNotConfigured as error:
+            raise HTTPException(status_code=503, detail="Configura Cloudinary antes de eliminar este producto") from error
+        except ImageStorageError as error:
+            raise HTTPException(status_code=502, detail="No fue posible eliminar la imagen del producto") from error
 
     db.delete(item)
     db.commit()

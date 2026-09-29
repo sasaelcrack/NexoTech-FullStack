@@ -59,6 +59,8 @@ class Producto(Base):
     stock = Column(Integer, nullable=True)
     estado = Column(String(20), nullable=True)
     fecha_creacion = Column(TIMESTAMP, server_default=func.now())
+    imagen_url = Column(String(1000), nullable=True)
+    imagen_public_id = Column(String(255), nullable=True)
 
 
 class Servicio(Base):
