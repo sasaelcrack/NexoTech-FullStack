@@ -1,4 +1,5 @@
 from io import BytesIO
+from xml.sax.saxutils import escape
 
 from app import models
 
@@ -56,6 +57,9 @@ def generar_excel_ventas(ventas, db):
                 float(venta.impuestos),
                 float(venta.total),
             ])
+            for celda in hoja[hoja.max_row]:
+                if celda.data_type == "f":
+                    celda.data_type = "s"
     for columna in ("J", "K", "L", "M", "N"):
         for celda in hoja[columna][4:]:
             celda.number_format = '#,##0'
@@ -88,8 +92,8 @@ def generar_pdf_tabla(titulo: str, encabezados: list[str], filas: list[list[str]
     estilo_encabezado = ParagraphStyle("FacturaHeader", parent=estilos["Normal"], fontName="Helvetica-Bold", fontSize=8, leading=9, textColor=colors.white)
     estilo_celda = ParagraphStyle("FacturaCell", parent=estilos["Normal"], fontName="Helvetica", fontSize=8, leading=10, textColor=colors.black, wordWrap="LTR")
     datos_tabla = [
-        [Paragraph(str(celda), estilo_encabezado) for celda in encabezados],
-        *[[Paragraph(str(celda), estilo_celda) for celda in fila] for fila in filas],
+        [Paragraph(escape(str(celda)), estilo_encabezado) for celda in encabezados],
+        *[[Paragraph(escape(str(celda)), estilo_celda) for celda in fila] for fila in filas],
     ]
     ancho_util = letter[0] - 72
     anchos = [ancho_util * 0.42, ancho_util * 0.14, ancho_util * 0.22, ancho_util * 0.22]
@@ -107,10 +111,10 @@ def generar_pdf_tabla(titulo: str, encabezados: list[str], filas: list[list[str]
         ("TOPPADDING", (0, 0), (-1, -1), 7),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
     ]))
-    contenido = [Paragraph(titulo, estilos["Title"]), Spacer(1, 0.08 * inch)]
+    contenido = [Paragraph(escape(titulo), estilos["Title"]), Spacer(1, 0.08 * inch)]
     if metadata:
         estilo_meta = ParagraphStyle("FacturaMeta", parent=estilos["Normal"], fontSize=9, leading=12, textColor=colors.HexColor("#374151"))
-        contenido.append(Table([[Paragraph(f"<b>{etiqueta}:</b> {valor}", estilo_meta)] for etiqueta, valor in metadata], colWidths=[ancho_util], style=TableStyle([("BOTTOMPADDING", (0, 0), (-1, -1), 3)])))
+        contenido.append(Table([[Paragraph(f"<b>{escape(etiqueta)}:</b> {escape(valor)}", estilo_meta)] for etiqueta, valor in metadata], colWidths=[ancho_util], style=TableStyle([("BOTTOMPADDING", (0, 0), (-1, -1), 3)])))
         contenido.append(Spacer(1, 0.12 * inch))
     contenido.append(tabla)
     documento.build(contenido)

@@ -1,6 +1,7 @@
 import os
 import time
-from collections import defaultdict, deque
+import threading
+from collections import OrderedDict, deque
 from datetime import datetime, timedelta, timezone
 import bcrypt
 from fastapi import Depends, HTTPException, Request, status
@@ -16,7 +17,9 @@ http_bearer = HTTPBearer()
 SECRET_KEY = os.getenv("JWT_SECRET")
 ALGORITHM = os.getenv("JWT_ALGORITHM")
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
-_request_windows: dict[tuple[str, str], deque[float]] = defaultdict(deque)
+_request_windows: OrderedDict[tuple[str, str], deque[float]] = OrderedDict()
+_MAX_REQUEST_WINDOW_KEYS = 10_000
+_request_windows_lock = threading.Lock()
 
 
 def limitar_solicitudes(request: Request) -> None:
@@ -30,16 +33,20 @@ def limitar_solicitudes(request: Request) -> None:
     limite, ventana = limites.get(request.url.path, (120, 60))
     ahora = time.monotonic()
     clave = (request.client.host if request.client else "unknown", request.url.path)
-    solicitudes = _request_windows[clave]
-    while solicitudes and ahora - solicitudes[0] >= ventana:
-        solicitudes.popleft()
-    if len(solicitudes) >= limite:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Demasiadas solicitudes. Intenta nuevamente más tarde.",
-            headers={"Retry-After": str(ventana)},
-        )
-    solicitudes.append(ahora)
+    with _request_windows_lock:
+        solicitudes = _request_windows.setdefault(clave, deque())
+        _request_windows.move_to_end(clave)
+        while solicitudes and ahora - solicitudes[0] >= ventana:
+            solicitudes.popleft()
+        if len(solicitudes) >= limite:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Demasiadas solicitudes. Intenta nuevamente más tarde.",
+                headers={"Retry-After": str(ventana)},
+            )
+        solicitudes.append(ahora)
+        if len(_request_windows) > _MAX_REQUEST_WINDOW_KEYS:
+            _request_windows.popitem(last=False)
 
 
 def crear_token(data: dict) -> str:

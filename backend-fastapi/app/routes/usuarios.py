@@ -242,8 +242,13 @@ def editar_usuario(usuario_id: int, datos: schemas.UsuarioUpdate, db: Session = 
     return usuario
 
 
+def _bloquear_rol_administrador(db: Session) -> None:
+    db.query(models.Rol).filter(models.Rol.id == 1).with_for_update().first()
+
+
 @router.patch("/{usuario_id}/estado", response_model=schemas.UsuarioResponse)
 def cambiar_estado(usuario_id: int, datos: schemas.CambiarEstado, db: Session = Depends(get_db), payload: dict = Depends(auth.verificar_rol(1))):
+    _bloquear_rol_administrador(db)
     usuario = db.query(models.Usuario).filter(models.Usuario.id == usuario_id).first()
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
@@ -267,6 +272,7 @@ def cambiar_rol_usuario(
     db: Session = Depends(get_db),
     payload: dict = Depends(auth.verificar_rol(1)),
 ):
+    _bloquear_rol_administrador(db)
     usuario = db.query(models.Usuario).filter(models.Usuario.id == usuario_id).first()
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
@@ -287,12 +293,20 @@ def cambiar_rol_usuario(
 
 @router.delete("/{usuario_id}")
 def eliminar_usuario(usuario_id: int, db: Session = Depends(get_db), payload: dict = Depends(auth.verificar_rol(1))):
+    _bloquear_rol_administrador(db)
     usuario = db.query(models.Usuario).filter(models.Usuario.id == usuario_id).first()
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
     if usuario.id == int(payload["sub"]):
         raise HTTPException(status_code=409, detail="No puedes eliminar tu propio usuario administrador")
+
+    if usuario.rol_id == 1 and usuario.estado == "activo":
+        admins_activos = db.query(models.Usuario).filter(
+            models.Usuario.rol_id == 1, models.Usuario.estado == "activo"
+        ).count()
+        if admins_activos <= 1:
+            raise HTTPException(status_code=409, detail="Debe existir al menos un administrador activo")
 
     pedidos = db.query(models.Pedido).filter(models.Pedido.usuario_id == usuario_id).count()
     ventas = db.query(models.Venta).filter(models.Venta.cliente_id == usuario_id).count()

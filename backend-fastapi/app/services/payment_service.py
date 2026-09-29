@@ -38,6 +38,20 @@ def _url_retorno_stripe(payment: models.Payment, tipo: str) -> str:
     return f"{ruta}{separador}{parametros}"
 
 
+def _linea_checkout(venta: models.Venta, resumen: str) -> list[dict]:
+    return [{
+        "price_data": {
+            "currency": "cop",
+            "product_data": {
+                "name": f"Compra NexoTech #{venta.id}",
+                "description": resumen[:500],
+            },
+            "unit_amount": int(Decimal(venta.total) * 100),
+        },
+        "quantity": 1,
+    }]
+
+
 def crear_pago_stripe(db, venta: models.Venta, customer: models.Usuario, idempotency_key: str) -> models.Payment:
     existente = payment_repository.obtener_por_idempotencia(db, idempotency_key)
     if existente:
@@ -59,17 +73,13 @@ def crear_pago_stripe(db, venta: models.Venta, customer: models.Usuario, idempot
     )
     db.add(payment)
     db.flush()
-    line_items = []
+    nombres_items = []
     for detail in venta.detalles:
         item = db.query(models.Producto if detail.producto_id else models.Servicio).filter_by(
             id=detail.producto_id or detail.servicio_id
         ).first()
-        # Stripe representa COP con dos decimales en Checkout; la app guarda pesos enteros.
-        line_items.append({"price_data": {"currency": "cop", "product_data": {"name": item.nombre},
-            "unit_amount": int(Decimal(detail.precio_unitario) * 100)}, "quantity": detail.cantidad})
-    if venta.impuestos:
-        line_items.append({"price_data": {"currency": "cop", "product_data": {"name": "IVA (19%)"},
-            "unit_amount": int(Decimal(venta.impuestos) * 100)}, "quantity": 1})
+        nombres_items.append(f"{detail.cantidad}x {item.nombre}")
+    line_items = _linea_checkout(venta, ", ".join(nombres_items))
     try:
         session = StripeProvider().crear_checkout(
             mode="payment", customer_email=customer.correo, line_items=line_items,

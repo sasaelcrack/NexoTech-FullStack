@@ -1,4 +1,6 @@
 import uuid
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -11,15 +13,23 @@ router = APIRouter(prefix="/api/pedidos", tags=["Pedidos"])
 def crear_pedido(datos: schemas.PedidoCreate, db: Session = Depends(get_db), payload: dict = Depends(auth.verificar_token)):
     usuario_id = int(payload["sub"])
     detalles = []
-    total = 0
+    total = Decimal("0")
+    productos = {}
+
+    for producto_id in sorted({item.id for item in datos.items if item.tipo_item == "producto"}):
+        producto = (
+            db.query(models.Producto)
+            .filter(models.Producto.id == producto_id, models.Producto.estado == "activo")
+            .with_for_update()
+            .first()
+        )
+        if not producto:
+            raise HTTPException(status_code=404, detail=f"Producto {producto_id} no disponible")
+        productos[producto_id] = producto
 
     for item in datos.items:
         if item.tipo_item == "producto":
-            obj = db.query(models.Producto).filter(
-                models.Producto.id == item.id, models.Producto.estado == "activo"
-            ).first()
-            if not obj:
-                raise HTTPException(status_code=404, detail=f"Producto {item.id} no disponible")
+            obj = productos[item.id]
             if obj.stock is not None and obj.stock < item.cantidad:
                 raise HTTPException(status_code=400, detail=f"Stock insuficiente para {obj.nombre}")
         else:
@@ -29,7 +39,7 @@ def crear_pedido(datos: schemas.PedidoCreate, db: Session = Depends(get_db), pay
             if not obj:
                 raise HTTPException(status_code=404, detail=f"Servicio {item.id} no disponible")
 
-        total += float(obj.precio) * item.cantidad
+        total += Decimal(obj.precio) * item.cantidad
 
         detalles.append(models.DetallePedido(
             tipo_item=item.tipo_item,
@@ -89,9 +99,32 @@ def cambiar_estado_pedido(
     db: Session = Depends(get_db),
     payload: dict = Depends(auth.verificar_rol(1, 2)),
 ):
-    pedido = db.query(models.Pedido).filter(models.Pedido.id == pedido_id).first()
+    pedido = db.query(models.Pedido).filter(models.Pedido.id == pedido_id).with_for_update().first()
     if not pedido:
         raise HTTPException(status_code=404, detail="Pedido no encontrado")
+
+    if pedido.estado == datos.estado:
+        return pedido
+    if pedido.estado != "pendiente":
+        raise HTTPException(status_code=409, detail="No se puede cambiar el estado de un pedido finalizado")
+
+    if datos.estado in ("fallido", "cancelado"):
+        cantidades_por_producto = {}
+        for detalle in pedido.detalles:
+            if detalle.tipo_item == "producto" and detalle.producto_id:
+                cantidades_por_producto[detalle.producto_id] = (
+                    cantidades_por_producto.get(detalle.producto_id, 0) + detalle.cantidad
+                )
+        for producto_id in sorted(cantidades_por_producto):
+            producto = (
+                db.query(models.Producto)
+                .filter(models.Producto.id == producto_id)
+                .with_for_update()
+                .first()
+            )
+            if producto and producto.stock is not None:
+                producto.stock += cantidades_por_producto[producto_id]
+
     pedido.estado = datos.estado
     db.commit()
     db.refresh(pedido)

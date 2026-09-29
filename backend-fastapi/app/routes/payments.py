@@ -57,15 +57,23 @@ def crear_pago(
     db: Session = Depends(get_db),
     payload: dict = Depends(auth.verificar_token),
 ):
-    existente = payment_repository.obtener_por_idempotencia(db, idempotency_key)
-    if existente:
-        return _response(existente)
-
-    venta = db.query(models.Venta).filter(models.Venta.id == datos.venta_id).first()
+    venta = (
+        db.query(models.Venta)
+        .filter(models.Venta.id == datos.venta_id)
+        .with_for_update()
+        .first()
+    )
     if not venta:
         raise HTTPException(status_code=404, detail="Venta no encontrada")
     if venta.cliente_id != int(payload["sub"]) and payload.get("rol_id") not in (1, 2):
         raise HTTPException(status_code=403, detail="No tienes permiso para pagar esta venta")
+
+    existente = payment_repository.obtener_por_idempotencia(db, idempotency_key)
+    if existente:
+        if existente.venta_id != venta.id:
+            raise HTTPException(status_code=409, detail="La clave de idempotencia ya fue usada en otra venta")
+        return _response(existente)
+
     if venta.estado in ("pagada", "cancelada"):
         raise HTTPException(status_code=409, detail="La venta no admite un nuevo pago")
 

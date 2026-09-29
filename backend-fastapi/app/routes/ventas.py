@@ -1,10 +1,12 @@
 from decimal import Decimal
 
+import stripe
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app import auth, models, schemas
 from app.database import get_db
+from app.integrations.stripe_provider import CheckoutNoCancelableError, StripeProvider
 
 
 router = APIRouter(prefix="/api/ventas", tags=["Ventas"])
@@ -19,14 +21,22 @@ def crear_venta(
 ):
     detalles = []
     subtotal = Decimal("0")
+    productos = {}
+
+    for producto_id in sorted({item.id for item in datos.items if item.tipo_item == "producto"}):
+        producto = (
+            db.query(models.Producto)
+            .filter(models.Producto.id == producto_id, models.Producto.estado == "activo")
+            .with_for_update()
+            .first()
+        )
+        if not producto:
+            raise HTTPException(status_code=404, detail=f"Producto {producto_id} no disponible")
+        productos[producto_id] = producto
 
     for item in datos.items:
         if item.tipo_item == "producto":
-            articulo = db.query(models.Producto).filter(
-                models.Producto.id == item.id, models.Producto.estado == "activo"
-            ).first()
-            if not articulo:
-                raise HTTPException(status_code=404, detail=f"Producto {item.id} no disponible")
+            articulo = productos[item.id]
             if articulo.stock is not None and articulo.stock < item.cantidad:
                 raise HTTPException(status_code=400, detail=f"Stock insuficiente para {articulo.nombre}")
         else:
@@ -111,37 +121,67 @@ def obtener_venta(
     return venta
 
 
-@router.post("/{venta_id}/cancelar", response_model=schemas.VentaResponse)
-def cancelar_mi_venta(
-    venta_id: int,
-    db: Session = Depends(get_db),
-    payload: dict = Depends(auth.verificar_token),
-):
-    venta = db.query(models.Venta).filter(models.Venta.id == venta_id).first()
-    if not venta:
-        raise HTTPException(status_code=404, detail="Venta no encontrada")
-    if venta.cliente_id != int(payload["sub"]):
-        raise HTTPException(status_code=403, detail="No tienes permiso para cancelar esta venta")
+def _cancelar_venta_pendiente(db: Session, venta: models.Venta):
     if venta.estado != "pendiente":
         raise HTTPException(
             status_code=409,
             detail="Solo puedes cancelar compras pendientes de pago",
         )
 
+    for pago in venta.pagos:
+        if pago.status != "PENDING":
+            continue
+        if pago.provider == "stripe" and pago.provider_transaction_id:
+            try:
+                StripeProvider().expirar_checkout(pago.provider_transaction_id)
+            except CheckoutNoCancelableError as error:
+                raise HTTPException(
+                    status_code=409,
+                    detail="El pago ya fue enviado o procesado y no se puede cancelar todavía",
+                ) from error
+            except stripe.StripeError as error:
+                raise HTTPException(
+                    status_code=502,
+                    detail="No fue posible confirmar la cancelación del pago con Stripe",
+                ) from error
+            except RuntimeError as error:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Stripe no está disponible para cancelar el pago",
+                ) from error
+            pago.status = "EXPIRED"
+        else:
+            pago.status = "VOIDED"
+
     for detalle in venta.detalles:
         if detalle.producto_id:
-            producto = db.query(models.Producto).filter(models.Producto.id == detalle.producto_id).first()
+            producto = (
+                db.query(models.Producto)
+                .filter(models.Producto.id == detalle.producto_id)
+                .with_for_update()
+                .first()
+            )
             if producto and producto.stock is not None:
                 producto.stock += detalle.cantidad
-
-    for pago in venta.pagos:
-        if pago.status == "PENDING":
-            pago.status = "VOIDED"
 
     venta.estado = "cancelada"
     db.commit()
     db.refresh(venta)
     return venta
+
+
+@router.post("/{venta_id}/cancelar", response_model=schemas.VentaResponse)
+def cancelar_mi_venta(
+    venta_id: int,
+    db: Session = Depends(get_db),
+    payload: dict = Depends(auth.verificar_token),
+):
+    venta = db.query(models.Venta).filter(models.Venta.id == venta_id).with_for_update().first()
+    if not venta:
+        raise HTTPException(status_code=404, detail="Venta no encontrada")
+    if venta.cliente_id != int(payload["sub"]):
+        raise HTTPException(status_code=403, detail="No tienes permiso para cancelar esta venta")
+    return _cancelar_venta_pendiente(db, venta)
 
 
 @router.patch("/{venta_id}/estado", response_model=schemas.VentaResponse)
@@ -151,9 +191,21 @@ def cambiar_estado_venta(
     db: Session = Depends(get_db),
     payload: dict = Depends(auth.verificar_rol(1, 2)),
 ):
-    venta = db.query(models.Venta).filter(models.Venta.id == venta_id).first()
+    venta = db.query(models.Venta).filter(models.Venta.id == venta_id).with_for_update().first()
     if not venta:
         raise HTTPException(status_code=404, detail="Venta no encontrada")
+
+    if datos.estado == "cancelada":
+        return _cancelar_venta_pendiente(db, venta)
+    if datos.estado == "pagada":
+        raise HTTPException(status_code=409, detail="El pago solo se confirma mediante Stripe")
+    if datos.estado == "completada" and venta.estado not in ("pagada", "completada"):
+        raise HTTPException(status_code=409, detail="Solo se puede completar una venta pagada")
+    if datos.estado == venta.estado:
+        return venta
+    if datos.estado != "completada":
+        raise HTTPException(status_code=409, detail="Transición de estado no permitida")
+
     venta.estado = datos.estado
     db.commit()
     db.refresh(venta)
