@@ -31,8 +31,8 @@ function Login() {
     if (name === "password") {
       if (!value) {
         message = "La contraseña es obligatoria.";
-      } else if (value.length < 6) {
-        message = "La contraseña debe tener al menos 6 caracteres.";
+      } else if (value.length < 8) {
+        message = "La contraseña debe tener al menos 8 caracteres.";
       }
     }
 
