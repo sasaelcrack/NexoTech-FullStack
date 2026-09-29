@@ -37,7 +37,7 @@ function CarritosActivos({ token }) {
       <div className="flex flex-col gap-3 border-b border-white/5 p-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="font-display text-lg font-semibold text-white">Carritos activos</h2>
-          <p className="mt-1 text-sm text-gray-500">Carritos guardados durante las últimas 24 horas; todavía no son ventas ni reservan stock.</p>
+          <p className="mt-1 text-sm text-gray-500">Carritos guardados y pagos pendientes de Stripe durante las últimas 24 horas.</p>
         </div>
         <button onClick={cargarCarritos} disabled={cargando} className="self-start rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-gray-200 transition hover:bg-white/10 disabled:opacity-50 sm:self-auto">
           {cargando ? "Actualizando..." : "Actualizar"}
@@ -52,11 +52,14 @@ function CarritosActivos({ token }) {
       ) : (
         <div className="space-y-4 p-4">
           {carritos.map((carrito) => (
-            <article key={carrito.usuario_id} className="rounded-xl border border-white/10 bg-[#111522]/75 p-4">
+            <article key={carrito.tipo_registro === "pago_pendiente" ? `venta-${carrito.venta_id}` : `carrito-${carrito.usuario_id}`} className="rounded-xl border border-white/10 bg-[#111522]/75 p-4">
               <header className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
                 <div>
                   <h3 className="font-medium text-white">{carrito.cliente_nombre}</h3>
                   <p className="text-xs text-gray-500">{carrito.cliente_correo}</p>
+                  <p className="mt-1 text-xs text-[#9bcaff]">
+                    {carrito.tipo_registro === "pago_pendiente" ? `Venta #${carrito.venta_id} · Pago pendiente en Stripe` : "Carrito sin checkout iniciado"}
+                  </p>
                 </div>
                 <time className="text-xs text-gray-500" dateTime={carrito.actualizado_en}>
                   Actualizado {carrito.actualizado_en ? new Date(carrito.actualizado_en).toLocaleString("es-CO", { dateStyle: "short", timeStyle: "short" }) : "—"}
@@ -73,7 +76,7 @@ function CarritosActivos({ token }) {
                         <td className="px-3 py-3 text-gray-300">{item.cantidad}</td>
                         <td className="px-3 py-3 text-gray-300">{formatoCOP(item.precio)}</td>
                         <td className="px-3 py-3 text-gray-300">{formatoCOP(item.subtotal)}</td>
-                        <td className="py-3 pl-3"><span className={item.disponible ? "text-xs text-emerald-300" : "text-xs text-amber-300"}>{item.disponible ? "Disponible" : "No disponible / stock insuficiente"}</span></td>
+                        <td className="py-3 pl-3"><span className={carrito.tipo_registro === "pago_pendiente" || item.disponible ? "text-xs text-emerald-300" : "text-xs text-amber-300"}>{carrito.tipo_registro === "pago_pendiente" ? "Incluido en la venta" : item.disponible ? "Disponible" : "No disponible / stock insuficiente"}</span></td>
                       </tr>
                     ))}
                   </tbody>
@@ -82,8 +85,9 @@ function CarritosActivos({ token }) {
 
               <footer className="mt-3 flex flex-wrap justify-end gap-x-5 gap-y-1 border-t border-white/5 pt-3 text-xs text-gray-400">
                 <span>Subtotal: {formatoCOP(carrito.subtotal)}</span>
-                <span>IVA estimado: {formatoCOP(carrito.impuestos)}</span>
-                <span className="font-semibold text-white">Total estimado: {formatoCOP(carrito.total_estimado)}</span>
+                {carrito.descuento > 0 && <span>Descuento: −{formatoCOP(carrito.descuento)}</span>}
+                <span>IVA: {formatoCOP(carrito.impuestos)}</span>
+                <span className="font-semibold text-white">{carrito.tipo_registro === "pago_pendiente" ? "Total de la venta" : "Total estimado"}: {formatoCOP(carrito.total_estimado)}</span>
               </footer>
             </article>
           ))}

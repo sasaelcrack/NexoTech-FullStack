@@ -1,4 +1,5 @@
 from io import BytesIO
+from datetime import datetime
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -884,6 +885,70 @@ def test_client_saved_cart_uses_database_price_and_tax(client, monkeypatch):
     assert response.json()["impuestos"] == 570000
     assert response.json()["total_estimado"] == 3570000
     assert database.carrito.items == [{"tipo_item": "producto", "id": 3, "cantidad": 2}]
+
+
+def test_active_carts_include_pending_stripe_sales_without_checkout_url(client, monkeypatch):
+    customer = SimpleNamespace(id=7, nombre="Ana", apellido="Lopez", correo="ana@example.com", estado="activo")
+    product = SimpleNamespace(id=3, nombre="Equipo demo", stock=2, estado="activo", imagen_url="https://images.example/equipo.png")
+    detail = SimpleNamespace(producto_id=3, servicio_id=None, cantidad=1, precio_unitario=10000, subtotal=10000)
+    sale = SimpleNamespace(
+        id=42,
+        cliente_id=7,
+        estado="pendiente",
+        subtotal=10000,
+        descuento=0,
+        impuestos=1900,
+        total=11900,
+        detalles=[detail],
+    )
+    payment = SimpleNamespace(
+        provider="stripe",
+        status="PENDING",
+        provider_transaction_id="cs_test_private",
+        checkout_url="https://checkout.stripe.com/private",
+        created_at=datetime.now(),
+        venta=sale,
+    )
+
+    class Query:
+        def __init__(self, model):
+            self.model = model
+
+        def filter(self, *_args):
+            return self
+
+        def order_by(self, *_args):
+            return self
+
+        def join(self, *_args):
+            return self
+
+        def all(self):
+            return [] if self.model is models.CarritoActivo else [payment]
+
+        def first(self):
+            if self.model is models.Usuario:
+                return customer
+            return product
+
+    class Database:
+        def query(self, model):
+            return Query(model)
+
+    monkeypatch.setitem(app.dependency_overrides, get_db, lambda: Database())
+    monkeypatch.setitem(app.dependency_overrides, auth.verificar_token, lambda: {"sub": "1", "rol_id": 2})
+
+    response = client.get("/api/carritos/activos")
+
+    assert response.status_code == 200
+    checkout = response.json()[0]
+    assert checkout["tipo_registro"] == "pago_pendiente"
+    assert checkout["venta_id"] == 42
+    assert checkout["estado_pago"] == "PENDING"
+    assert checkout["cliente_nombre"] == "Ana Lopez"
+    assert checkout["items"][0]["nombre"] == "Equipo demo"
+    assert checkout["total_estimado"] == 11900
+    assert "checkout_url" not in checkout
 
 
 def test_disabled_product_remains_visible_but_unavailable_in_saved_cart():

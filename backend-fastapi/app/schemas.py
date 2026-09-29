@@ -200,11 +200,15 @@ class CarritoItemResponse(BaseModel):
 
 class CarritoResponse(BaseModel):
     usuario_id: int
+    tipo_registro: str = "carrito_activo"
+    venta_id: Optional[int] = None
+    estado_pago: Optional[str] = None
     cliente_nombre: Optional[str] = None
     cliente_correo: Optional[EmailStr] = None
     actualizado_en: Optional[datetime] = None
     items: list[CarritoItemResponse] = Field(default_factory=list)
     subtotal: float = 0
+    descuento: float = 0
     impuestos: float = 0
     total_estimado: float = 0
 

@@ -50,13 +50,55 @@ def _materializar_carrito(db: Session, carrito: models.CarritoActivo | None, usu
     actualizado = carrito.actualizado_en if carrito else None
     return {
         "usuario_id": usuario.id,
+        "tipo_registro": "carrito_activo",
         "cliente_nombre": f"{usuario.nombre} {usuario.apellido}",
         "cliente_correo": usuario.correo,
         "actualizado_en": actualizado,
         "items": items,
         "subtotal": float(subtotal),
+        "descuento": 0,
         "impuestos": float(impuestos),
         "total_estimado": float(subtotal + impuestos),
+    }
+
+
+def _materializar_pago_pendiente(db: Session, pago: models.Payment):
+    venta = pago.venta
+    usuario = db.query(models.Usuario).filter(models.Usuario.id == venta.cliente_id).first()
+    if not usuario or usuario.estado != "activo":
+        return None
+
+    items = []
+    for detalle in venta.detalles:
+        es_producto = detalle.producto_id is not None
+        modelo = models.Producto if es_producto else models.Servicio
+        articulo_id = detalle.producto_id if es_producto else detalle.servicio_id
+        articulo = db.query(modelo).filter(modelo.id == articulo_id).first()
+        items.append({
+            "tipo_item": "producto" if es_producto else "servicio",
+            "id": articulo_id,
+            "nombre": articulo.nombre if articulo else "Artículo no disponible",
+            "imagen_url": articulo.imagen_url if es_producto and articulo else None,
+            "cantidad": detalle.cantidad,
+            "precio": float(detalle.precio_unitario),
+            "subtotal": float(detalle.subtotal),
+            "disponible": True,
+            "stock": articulo.stock if es_producto and articulo else None,
+        })
+
+    return {
+        "usuario_id": usuario.id,
+        "tipo_registro": "pago_pendiente",
+        "venta_id": venta.id,
+        "estado_pago": pago.status,
+        "cliente_nombre": f"{usuario.nombre} {usuario.apellido}",
+        "cliente_correo": usuario.correo,
+        "actualizado_en": pago.created_at,
+        "items": items,
+        "subtotal": float(venta.subtotal),
+        "descuento": float(venta.descuento),
+        "impuestos": float(venta.impuestos),
+        "total_estimado": float(venta.total),
     }
 
 
@@ -131,4 +173,24 @@ def listar_carritos_activos(
         usuario = db.query(models.Usuario).filter(models.Usuario.id == carrito.usuario_id).first()
         if usuario and usuario.estado == "activo" and carrito.items:
             resultados.append(_materializar_carrito(db, carrito, usuario))
+
+    pagos_pendientes = (
+        db.query(models.Payment)
+        .join(models.Venta)
+        .filter(
+            models.Payment.provider == "stripe",
+            models.Payment.status == "PENDING",
+            models.Payment.provider_transaction_id.isnot(None),
+            models.Payment.created_at >= limite,
+            models.Venta.estado == "pendiente",
+        )
+        .order_by(models.Payment.created_at.desc())
+        .all()
+    )
+    for pago in pagos_pendientes:
+        registro = _materializar_pago_pendiente(db, pago)
+        if registro:
+            resultados.append(registro)
+
+    resultados.sort(key=lambda registro: registro["actualizado_en"] or limite, reverse=True)
     return resultados
