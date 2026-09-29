@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.requests import Request
 from starlette.responses import Response
 from app import auth
-from app.routes import usuarios, productos, servicios, panel, pedidos, ventas, facturas, payments, pqr, conversaciones, dashboards, reportes, chatbot
+from app.routes import usuarios, productos, servicios, panel, pedidos, ventas, facturas, payments, pqr, conversaciones, dashboards, reportes, chatbot, carritos
 
 en_produccion = os.getenv("ENVIRONMENT", "development").lower() == "production"
 @asynccontextmanager
@@ -84,6 +84,7 @@ app.include_router(conversaciones.router)
 app.include_router(dashboards.router)
 app.include_router(reportes.router)
 app.include_router(chatbot.router)
+app.include_router(carritos.router)
 
 
 @app.get("/")

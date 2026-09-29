@@ -33,6 +33,7 @@ def crear_factura_desde_venta(
         numero_factura=f"NXT-{venta.id:08d}",
         cliente_id=venta.cliente_id,
         subtotal=venta.subtotal,
+        descuento=venta.descuento,
         impuestos=venta.impuestos,
         total=venta.total,
         estado="emitida",
@@ -95,8 +96,12 @@ def descargar_factura_pdf(
             articulo = db.query(models.Servicio).filter(models.Servicio.id == detalle.servicio_id).first()
         nombre = articulo.nombre if articulo else f"{tipo} no disponible"
         filas.append([f"{nombre} ({tipo})", str(detalle.cantidad), _formato_cop(detalle.precio_unitario), _formato_cop(detalle.subtotal)])
+    descuento = factura.descuento or 0
+    base_gravable = factura.subtotal - descuento
     filas.extend([
         ["Subtotal", "", "", _formato_cop(factura.subtotal)],
+        ["Descuento", "", "", f"- {_formato_cop(descuento)}"],
+        ["Base gravable", "", "", _formato_cop(base_gravable)],
         ["IVA (19%)", "", "", _formato_cop(factura.impuestos)],
         ["Total", "", "", _formato_cop(factura.total)],
     ])
@@ -108,10 +113,13 @@ def descargar_factura_pdf(
             metadata=[
                 ("Empresa", "NexoTech | Soluciones tecnológicas"),
                 ("Fecha", factura.fecha.strftime("%Y-%m-%d %H:%M") if factura.fecha else ""),
+                ("Venta", f"#{factura.venta_id}"),
                 ("Cliente", f"{cliente.nombre} {cliente.apellido}" if cliente else f"Cliente #{factura.cliente_id}"),
                 ("Correo", cliente.correo if cliente else ""),
                 ("Responsable", f"{responsable.nombre} {responsable.apellido}" if responsable else "Venta en línea"),
+                ("Estado", factura.estado.capitalize()),
             ],
+            filas_resumen=5,
         )
     except RuntimeError as error:
         raise HTTPException(status_code=503, detail="No fue posible generar la factura") from error

@@ -80,6 +80,7 @@ function Cliente() {
   const [nuevoMensaje, setNuevoMensaje] = useState("");
 
   const [carrito, setCarrito] = useState([]); // { tipo_item, id, nombre, precio, cantidad, stock }
+  const sincronizacionCarrito = useRef(Promise.resolve());
 
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState("");
@@ -126,6 +127,18 @@ function Cliente() {
           method: "POST",
           headers: authHeaders(token),
         });
+
+  useEffect(() => {
+    const recargarTrasRestauracion = (event) => {
+      if (!event.persisted) return;
+      cargarTodo();
+      setActiveKey("pedidos");
+    };
+    window.addEventListener("pageshow", recargarTrasRestauracion);
+    return () => window.removeEventListener("pageshow", recargarTrasRestauracion);
+    // cargarTodo usa la sesión capturada al montar el panel.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || "No se pudo consultar el estado del pago");
         const mensajes = {
@@ -149,7 +162,7 @@ function Cliente() {
     setCargando(true);
     setError("");
     try {
-      const [resProd, resServ, resPerfil, resPedidos, resFacturas, resPagos, resPqrs, resConversaciones] = await Promise.all([
+      const [resProd, resServ, resPerfil, resPedidos, resFacturas, resPagos, resPqrs, resConversaciones, resCarrito] = await Promise.all([
         fetch(`${API_URL}/productos/`),
         fetch(`${API_URL}/servicios/`),
         fetch(`${API_URL}/usuarios/me`, { headers: authHeaders(token) }),
@@ -158,8 +171,9 @@ function Cliente() {
         fetch(`${API_URL}/v1/payments/mine`, { headers: authHeaders(token) }),
         fetch(`${API_URL}/pqr/mias`, { headers: authHeaders(token) }),
         fetch(`${API_URL}/conversaciones/mias`, { headers: authHeaders(token) }),
+        fetch(`${API_URL}/carritos/mio`, { headers: authHeaders(token) }),
       ]);
-      const [dataProd, dataServ, dataPerfil, dataPedidos, dataFacturas, dataPagos, dataPqrs, dataConversaciones] = await Promise.all([
+      const [dataProd, dataServ, dataPerfil, dataPedidos, dataFacturas, dataPagos, dataPqrs, dataConversaciones, dataCarrito] = await Promise.all([
         resProd.json(),
         resServ.json(),
         resPerfil.json(),
@@ -168,6 +182,7 @@ function Cliente() {
         resPagos.json(),
         resPqrs.json(),
         resConversaciones.json(),
+        resCarrito.json(),
       ]);
       if (!resProd.ok) throw new Error(dataProd.detail || "Error al cargar productos");
       if (!resServ.ok) throw new Error(dataServ.detail || "Error al cargar servicios");
@@ -177,6 +192,7 @@ function Cliente() {
       if (!resPagos.ok) throw new Error(dataPagos.detail || "Error al cargar pagos");
       if (!resPqrs.ok) throw new Error(dataPqrs.detail || "Error al cargar tus PQR");
       if (!resConversaciones.ok) throw new Error(dataConversaciones.detail || "Error al cargar tus conversaciones");
+      if (!resCarrito.ok) throw new Error(dataCarrito.detail || "Error al recuperar el carrito guardado");
 
       setCatalogoProductos(dataProd);
       setCatalogoServicios(dataServ);
@@ -191,6 +207,7 @@ function Cliente() {
       setPqrs(dataPqrs);
       setConversaciones(dataConversaciones);
       setConversacionActiva(dataConversaciones[0] || null);
+      setCarrito(dataCarrito.items || []);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -271,49 +288,72 @@ function Cliente() {
   const agregarAlCarrito = (item, tipo_item) => {
     if (!tiposItemPermitidos.has(tipo_item)) return;
     setMensajeCompra("");
-    setCarrito((prev) => {
-      const existente = prev.find((c) => c.tipo_item === tipo_item && c.id === item.id);
-      if (existente) {
-        const nuevaCantidad = existente.cantidad + 1;
-        if (tipo_item === "producto" && item.stock !== null && nuevaCantidad > item.stock) return prev;
-        return prev.map((c) =>
-          c.tipo_item === tipo_item && c.id === item.id ? { ...c, cantidad: nuevaCantidad } : c
-        );
-      }
-      return [
-        ...prev,
-        {
-          tipo_item,
-          id: item.id,
-          nombre: item.nombre,
-          precio: Number(item.precio),
-          cantidad: 1,
-          stock: tipo_item === "producto" ? item.stock : null,
-        },
-      ];
-    });
+    const existente = carrito.find((carritoItem) => carritoItem.tipo_item === tipo_item && carritoItem.id === item.id);
+    let siguiente;
+    if (existente) {
+      const nuevaCantidad = existente.cantidad + 1;
+      if (tipo_item === "producto" && item.stock !== null && nuevaCantidad > item.stock) return;
+      siguiente = carrito.map((carritoItem) =>
+        carritoItem.tipo_item === tipo_item && carritoItem.id === item.id
+          ? { ...carritoItem, cantidad: nuevaCantidad, disponible: true }
+          : carritoItem
+      );
+    } else {
+      siguiente = [...carrito, {
+        tipo_item,
+        id: item.id,
+        nombre: item.nombre,
+        precio: Number(item.precio),
+        cantidad: 1,
+        stock: tipo_item === "producto" ? item.stock : null,
+        imagen_url: tipo_item === "producto" ? item.imagen_url || null : null,
+        disponible: true,
+      }];
+    }
+    setCarrito(siguiente);
+    guardarCarritoServidor(siguiente);
   };
 
   const cambiarCantidad = (tipo_item, id, delta) => {
-    setCarrito((prev) =>
-      prev
-        .map((c) => {
-          if (c.tipo_item !== tipo_item || c.id !== id) return c;
-          const nueva = c.cantidad + delta;
-          if (c.stock !== null && nueva > c.stock) return c;
-          return { ...c, cantidad: nueva };
-        })
-        .filter((c) => c.cantidad > 0)
-    );
+    const siguiente = carrito
+      .map((item) => {
+        if (item.tipo_item !== tipo_item || item.id !== id) return item;
+        const nueva = item.cantidad + delta;
+        if (nueva <= 0 || (item.stock !== null && nueva > item.stock)) return item;
+        return { ...item, cantidad: nueva };
+      })
+      .filter((item) => item.tipo_item !== tipo_item || item.id !== id || item.cantidad + delta > 0);
+    setCarrito(siguiente);
+    guardarCarritoServidor(siguiente);
   };
 
   const quitarDelCarrito = (tipo_item, id) => {
-    setCarrito((prev) => prev.filter((c) => !(c.tipo_item === tipo_item && c.id === id)));
+    const siguiente = carrito.filter((item) => !(item.tipo_item === tipo_item && item.id === id));
+    setCarrito(siguiente);
+    guardarCarritoServidor(siguiente);
   };
 
   const cancelarCompraEnCarrito = () => {
     setCarrito([]);
+    guardarCarritoServidor([]);
     setMensajeCompra("Compra cancelada. No se creó ningún pedido ni pago.");
+  };
+
+  const guardarCarritoServidor = (items) => {
+    const payload = { items: items.map(({ tipo_item, id, cantidad }) => ({ tipo_item, id, cantidad })) };
+    sincronizacionCarrito.current = sincronizacionCarrito.current
+      .catch(() => undefined)
+      .then(async () => {
+        const response = await fetch(`${API_URL}/carritos/mio`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", ...authHeaders(token) },
+          body: JSON.stringify(payload),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || "No se pudo guardar el carrito");
+      })
+      .catch((error) => setMensajeCompra(`No se guardó el carrito en el servidor: ${error.message}`));
+    return sincronizacionCarrito.current;
   };
 
   const nombreDetalle = (detalle) => {
@@ -322,11 +362,18 @@ function Cliente() {
     return item?.nombre || detalle.nombre_item || "Artículo no disponible";
   };
 
-  const totalCarrito = carrito.reduce((acc, c) => acc + c.precio * c.cantidad, 0);
+  const subtotalCarrito = carrito.reduce((acc, item) => acc + (item.disponible === false ? 0 : item.precio * item.cantidad), 0);
+  const ivaCarrito = Math.round(subtotalCarrito * 0.19);
+  const totalConIvaCarrito = subtotalCarrito + ivaCarrito;
+  const hayItemsNoDisponibles = carrito.some((item) => item.disponible === false);
   const cantidadEnCarrito = (tipo_item, id) => carrito.find((c) => c.tipo_item === tipo_item && c.id === id)?.cantidad || 0;
 
   const confirmarCompra = async () => {
     if (carrito.length === 0) return;
+    if (hayItemsNoDisponibles) {
+      setMensajeCompra("Quita los artículos no disponibles antes de confirmar la compra.");
+      return;
+    }
     setProcesandoCompra(true);
     setMensajeCompra("");
     try {
@@ -366,6 +413,7 @@ function Cliente() {
           : data.detail;
         throw new Error(detail || "No se pudo completar la compra");
       }
+      setCarrito([]);
 
       const pagoRes = await fetch(`${API_URL}/v1/payments`, {
         method: "POST",
@@ -380,7 +428,6 @@ function Cliente() {
       if (!pagoRes.ok || !pago.checkout_url) {
         throw new Error(pago.detail || "No se pudo iniciar el pago con Stripe");
       }
-      setCarrito([]);
       window.location.assign(pago.checkout_url);
     } catch (err) {
       setMensajeCompra(err.message);
@@ -541,18 +588,23 @@ function Cliente() {
                     {carrito.map((c) => (
                       <tr key={`${c.tipo_item}-${c.id}`} className="border-b border-white/5 last:border-0">
                         <td className="p-4 text-white">
-                          {c.nombre}
-                          <span className="text-xs text-gray-500 ml-2 capitalize">({c.tipo_item})</span>
+                          <div className="flex items-center gap-3">
+                            {c.tipo_item === "producto" ? <ProductoImagen src={c.imagen_url} nombre={c.nombre} className="h-12 w-12" /> : <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-[#9d8cff]/10 text-lg text-[#b9adff]">✦</span>}
+                            <div className="min-w-0">
+                              <p className="font-medium">{c.nombre}<span className="ml-2 text-xs capitalize text-gray-500">({c.tipo_item})</span></p>
+                              {c.disponible === false && <p className="mt-1 text-xs text-amber-300">Ya no está disponible; quítalo para continuar.</p>}
+                            </div>
+                          </div>
                         </td>
                         <td className="p-4 text-gray-300">{formatoCOP(c.precio)}</td>
                         <td className="p-4">
                           <div className="flex items-center gap-2">
                             <button onClick={() => cambiarCantidad(c.tipo_item, c.id, -1)} className="w-7 h-7 rounded-md bg-white/5 hover:bg-white/10 text-white cursor-pointer">−</button>
                             <span className="text-white w-6 text-center">{c.cantidad}</span>
-                            <button onClick={() => cambiarCantidad(c.tipo_item, c.id, 1)} disabled={c.stock !== null && c.cantidad >= c.stock} className="w-7 h-7 rounded-md bg-white/5 hover:bg-white/10 disabled:opacity-30 text-white cursor-pointer">+</button>
+                            <button onClick={() => cambiarCantidad(c.tipo_item, c.id, 1)} disabled={c.disponible === false || (c.stock !== null && c.cantidad >= c.stock)} className="w-7 h-7 rounded-md bg-white/5 hover:bg-white/10 disabled:opacity-30 text-white cursor-pointer">+</button>
                           </div>
                         </td>
-                        <td className="p-4 text-[#4ea1ff] font-medium">{formatoCOP(c.precio * c.cantidad)}</td>
+                        <td className="p-4 text-[#4ea1ff] font-medium">{formatoCOP(c.disponible === false ? 0 : c.precio * c.cantidad)}</td>
                         <td className="p-4">
                           <button onClick={() => quitarDelCarrito(c.tipo_item, c.id)} className="px-3 py-1 rounded-md bg-red-500/10 hover:bg-red-500/20 text-xs text-red-400 cursor-pointer">Quitar</button>
                         </td>
@@ -562,16 +614,19 @@ function Cliente() {
                 </table>
               </div>
 
-              <div className="flex flex-wrap items-center justify-between gap-3 p-5 border-t border-white/5">
-                <p className="text-gray-400 text-sm">
-                  Total: <span className="text-white font-display text-lg font-semibold">{formatoCOP(totalCarrito)}</span>
-                </p>
+              <div className="flex flex-col gap-4 border-t border-white/5 p-5 sm:flex-row sm:items-end sm:justify-between">
+                <div className="space-y-1 text-sm">
+                  <p className="text-gray-400">Subtotal: <span className="text-gray-200">{formatoCOP(subtotalCarrito)}</span></p>
+                  <p className="text-gray-400">IVA (19%): <span className="text-gray-200">{formatoCOP(ivaCarrito)}</span></p>
+                  <p className="pt-1 text-gray-300">Total estimado: <span className="text-white font-display text-lg font-semibold">{formatoCOP(totalConIvaCarrito)}</span></p>
+                  <p className="text-xs text-gray-500">El total final se confirma al crear la venta.</p>
+                </div>
                 <div className="flex flex-wrap gap-2">
                   <button onClick={cancelarCompraEnCarrito} disabled={procesandoCompra} className="px-4 py-2.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 disabled:opacity-50 text-red-300 text-sm font-medium cursor-pointer">
                     Cancelar compra
                   </button>
-                  <button onClick={confirmarCompra} disabled={procesandoCompra} className="px-5 py-2.5 rounded-lg bg-[#4ea1ff] hover:bg-[#3a8fee] disabled:opacity-50 text-white text-sm font-medium cursor-pointer">
-                    {procesandoCompra ? "Procesando..." : "Confirmar compra"}
+                  <button onClick={confirmarCompra} disabled={procesandoCompra || hayItemsNoDisponibles} className="px-5 py-2.5 rounded-lg bg-[#4ea1ff] hover:bg-[#3a8fee] disabled:opacity-50 text-white text-sm font-medium cursor-pointer">
+                    {procesandoCompra ? "Procesando..." : hayItemsNoDisponibles ? "Revisa el carrito" : "Confirmar compra"}
                   </button>
                 </div>
               </div>

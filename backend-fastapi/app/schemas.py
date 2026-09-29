@@ -164,7 +164,7 @@ class ServicioResponse(ServicioBase):
         
 class ItemCarrito(BaseModel):
     tipo_item: str
-    id: int
+    id: int = Field(..., gt=0)
     cantidad: int = Field(1, ge=1)
 
     @field_validator("tipo_item")
@@ -173,6 +173,40 @@ class ItemCarrito(BaseModel):
         if v not in ("producto", "servicio"):
             raise ValueError("tipo_item debe ser 'producto' o 'servicio'")
         return v
+
+
+class CarritoSync(BaseModel):
+    items: list[ItemCarrito] = Field(default_factory=list, max_length=30)
+
+    @model_validator(mode="after")
+    def validar_items_sin_repetir(self):
+        identificadores = [(item.tipo_item, item.id) for item in self.items]
+        if len(identificadores) != len(set(identificadores)):
+            raise ValueError("Cada producto o servicio debe aparecer una sola vez en el carrito")
+        return self
+
+
+class CarritoItemResponse(BaseModel):
+    tipo_item: str
+    id: int
+    nombre: str
+    imagen_url: Optional[str] = None
+    cantidad: int
+    precio: float
+    subtotal: float
+    disponible: bool
+    stock: Optional[int] = None
+
+
+class CarritoResponse(BaseModel):
+    usuario_id: int
+    cliente_nombre: Optional[str] = None
+    cliente_correo: Optional[EmailStr] = None
+    actualizado_en: Optional[datetime] = None
+    items: list[CarritoItemResponse] = Field(default_factory=list)
+    subtotal: float = 0
+    impuestos: float = 0
+    total_estimado: float = 0
 
 
 class PedidoCreate(BaseModel):
@@ -267,6 +301,7 @@ class FacturaResponse(BaseModel):
     numero_factura: str
     cliente_id: int
     subtotal: float
+    descuento: float = 0
     impuestos: float
     total: float
     estado: str

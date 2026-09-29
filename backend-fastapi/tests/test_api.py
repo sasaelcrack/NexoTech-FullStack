@@ -18,10 +18,11 @@ from app.integrations.cloudinary_images import ImageStorageNotConfigured, MAX_IM
 from app.integrations.stripe_provider import CheckoutNoCancelableError, StripeProvider
 from app.main import app
 from app.routes import chatbot as chatbot_route
+from app.routes import carritos as carritos_route
 from app.routes import productos as productos_route
 from app.routes import usuarios as usuarios_route
 from app.services import ia_service
-from app.services.payment_service import _linea_checkout
+from app.services.payment_service import _linea_checkout, aplicar_estado_pago
 from app.utils.documentos import generar_excel_ventas, generar_pdf_tabla
 
 
@@ -82,13 +83,17 @@ def test_product_schema_rejects_invalid_payload():
 
 
 def test_checkout_amount_uses_sale_total_including_discount_and_tax():
-    sale = SimpleNamespace(id=12, total=10591)
+    sale = SimpleNamespace(id=12, subtotal=10000, descuento=1000, impuestos=1710, total=10710)
 
     line_item = _linea_checkout(sale, "1x Equipo profesional")[0]
 
-    assert line_item["price_data"]["unit_amount"] == 1059100
+    assert line_item["price_data"]["unit_amount"] == 1071000
     assert line_item["quantity"] == 1
-    assert line_item["price_data"]["product_data"]["description"] == "1x Equipo profesional"
+    descripcion = line_item["price_data"]["product_data"]["description"]
+    assert "Subtotal: $10.000 COP" in descripcion
+    assert "Descuento: -$1.000 COP" in descripcion
+    assert "IVA (19%): $1.710 COP" in descripcion
+    assert "Total: $10.710 COP" in descripcion
 
 
 def test_create_payment_checks_sale_ownership_before_idempotency_lookup(client, monkeypatch):
@@ -224,8 +229,9 @@ def test_excel_report_stores_formula_like_item_names_as_text():
         fecha=None,
         estado="pagada",
         subtotal=10000,
-        impuestos=1900,
-        total=11900,
+        descuento=1000,
+        impuestos=1710,
+        total=10710,
         detalles=[SimpleNamespace(
             producto_id=3,
             servicio_id=None,
@@ -256,6 +262,12 @@ def test_excel_report_stores_formula_like_item_names_as_text():
 
     assert cell.data_type == "s"
     assert cell.value == product.nombre
+    assert workbook["Ventas"]["M4"].value == "Descuento (COP)"
+    assert workbook["Ventas"]["M5"].value == 1000
+    assert workbook["Ventas"]["N5"].value == 9000
+    assert workbook["Ventas"]["O5"].value == 1710
+    assert workbook["Ventas"]["P5"].value == 10710
+    assert workbook["Ventas"].freeze_panes == "A5"
 
 
 def test_pdf_report_escapes_user_supplied_markup():
@@ -747,6 +759,157 @@ def test_chatbot_local_fallback_uses_the_live_product_catalog(client, monkeypatc
     assert "Equipo de trabajo demo" in response.json()["respuesta"]
     assert "Configuración profesional" in response.json()["respuesta"]
     assert "4 disponibles" in response.json()["respuesta"]
+
+
+def test_client_saved_cart_uses_database_price_and_tax(client, monkeypatch):
+    customer = SimpleNamespace(id=7, nombre="Ana", apellido="Lopez", correo="ana@example.com", estado="activo")
+    product = SimpleNamespace(id=3, nombre="Equipo demo", precio=1500000, stock=4, estado="activo", imagen_url="https://images.example/equipo.png")
+    database = SimpleNamespace(carrito=None)
+
+    class Query:
+        def __init__(self, model):
+            self.model = model
+
+        def filter(self, *_args):
+            return self
+
+        def with_for_update(self):
+            return self
+
+        def first(self):
+            if self.model is models.Usuario:
+                return customer
+            if self.model is models.Producto:
+                return product
+            return database.carrito
+
+    class Database:
+        def query(self, model):
+            return Query(model)
+
+        def add(self, item):
+            database.carrito = item
+
+        def delete(self, _item):
+            database.carrito = None
+
+        def commit(self):
+            return None
+
+        def refresh(self, _item):
+            return None
+
+    db = Database()
+    monkeypatch.setitem(app.dependency_overrides, get_db, lambda: db)
+    monkeypatch.setitem(app.dependency_overrides, auth.verificar_token, lambda: {"sub": "7", "rol_id": 3})
+
+    response = client.put(
+        "/api/carritos/mio",
+        json={"items": [{"tipo_item": "producto", "id": 3, "cantidad": 2, "precio": 1}]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["cliente_nombre"] == "Ana Lopez"
+    assert response.json()["items"][0]["precio"] == 1500000
+    assert response.json()["items"][0]["imagen_url"] == product.imagen_url
+    assert response.json()["subtotal"] == 3000000
+    assert response.json()["impuestos"] == 570000
+    assert response.json()["total_estimado"] == 3570000
+    assert database.carrito.items == [{"tipo_item": "producto", "id": 3, "cantidad": 2}]
+
+
+def test_disabled_product_remains_visible_but_unavailable_in_saved_cart():
+    customer = SimpleNamespace(id=7, nombre="Ana", apellido="Lopez", correo="ana@example.com")
+    product = SimpleNamespace(id=3, nombre="Equipo demo", precio=1500000, stock=4, estado="inactivo", imagen_url="https://images.example/equipo.png")
+    cart = SimpleNamespace(
+        actualizado_en=None,
+        items=[{"tipo_item": "producto", "id": 3, "cantidad": 2}],
+    )
+
+    class Query:
+        def __init__(self, model):
+            self.model = model
+
+        def filter(self, *_args):
+            return self
+
+        def first(self):
+            return product if self.model is models.Producto else None
+
+    class Database:
+        def query(self, model):
+            return Query(model)
+
+    result = carritos_route._materializar_carrito(Database(), cart, customer)
+
+    assert result["items"][0]["nombre"] == "Equipo demo"
+    assert result["items"][0]["disponible"] is False
+    assert result["items"][0]["imagen_url"] == product.imagen_url
+    assert result["subtotal"] == 0
+    assert result["impuestos"] == 0
+
+
+@pytest.mark.parametrize("status", ["EXPIRED", "DECLINED"])
+def test_terminal_stripe_payment_cancels_sale_and_restores_stock_once(status):
+    product = SimpleNamespace(stock=0)
+    detail = SimpleNamespace(producto_id=3, cantidad=2)
+    sale = SimpleNamespace(estado="pendiente", detalles=[detail])
+    payment = SimpleNamespace(status="PENDING", venta=sale)
+
+    class Query:
+        def filter(self, *_args):
+            return self
+
+        def with_for_update(self):
+            return self
+
+        def first(self):
+            return product
+
+    class Database:
+        def query(self, _model):
+            return Query()
+
+    database = Database()
+
+    assert aplicar_estado_pago(database, payment, status)
+    assert payment.status == status
+    assert sale.estado == "cancelada"
+    assert product.stock == 2
+    assert aplicar_estado_pago(database, payment, status) is False
+    assert product.stock == 2
+
+
+def test_disabled_product_cannot_be_purchased(client, monkeypatch):
+    class Query:
+        def filter(self, *_args):
+            return self
+
+        def with_for_update(self):
+            return self
+
+        def first(self):
+            return None
+
+    class Database:
+        def query(self, _model):
+            return Query()
+
+    monkeypatch.setitem(app.dependency_overrides, get_db, lambda: Database())
+    monkeypatch.setitem(app.dependency_overrides, auth.verificar_token, lambda: {"sub": "7", "rol_id": 3})
+
+    response = client.post("/api/ventas/", json={"items": [{"tipo_item": "producto", "id": 3, "cantidad": 1}]})
+
+    assert response.status_code == 404
+    assert "no disponible" in response.json()["detail"]
+
+
+def test_employee_cannot_overwrite_customer_cart(client, monkeypatch):
+    monkeypatch.setitem(app.dependency_overrides, auth.verificar_token, lambda: {"sub": "8", "rol_id": 2})
+
+    response = client.put("/api/carritos/mio", json={"items": []})
+
+    assert response.status_code == 403
 
 
 def test_token_uses_current_role_and_rejects_inactive_user(monkeypatch):

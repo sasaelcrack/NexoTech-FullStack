@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { API_URL, getStoredSession } from "../config";
 import DashboardLayout from "../components/DashboardLayout";
 import SupportInbox from "../components/SupportInbox";
+import CarritosActivos from "../components/CarritosActivos";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Toast from "../components/Toast";
 import TableControls from "../components/TableControls";
@@ -12,6 +13,7 @@ const menu = [
   { key: "resumen", label: "Resumen", icon: IconGrid },
   { key: "productos", label: "Productos", icon: IconBox },
   { key: "servicios", label: "Servicios", icon: IconWrench },
+  { key: "carritos", label: "Carritos", icon: IconReceipt },
   { key: "ventas", label: "Ventas", icon: IconReceipt },
   { key: "facturas", label: "Facturas", icon: IconReceipt },
   { key: "soporte", label: "Soporte", icon: IconMessage },
@@ -101,6 +103,30 @@ function Empleado() {
   useEffect(() => {
     cargarTodo();
   }, [cargarTodo]);
+
+  const solicitarCancelacionVenta = (venta) => {
+    setConfirmacion({
+      title: `Cancelar venta #${venta.id}`,
+      description: "Se cerrará el checkout de Stripe y se devolverán las existencias reservadas. Esta acción no se puede deshacer.",
+      confirmLabel: "Cancelar venta pendiente",
+      danger: true,
+      onConfirm: async () => {
+        try {
+          const response = await fetch(`${API_URL}/ventas/${venta.id}/estado`, {
+            method: "PATCH",
+            headers: authHeaders,
+            body: JSON.stringify({ estado: "cancelada" }),
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.detail || "No se pudo cancelar la venta");
+          setNotificacion({ type: "success", message: `La venta #${venta.id} fue cancelada.` });
+          await cargarTodo();
+        } catch (requestError) {
+          setNotificacion({ type: "error", message: requestError.message });
+        }
+      },
+    });
+  };
 
   // ---- Productos ----
   const abrirCreacion = () => {
@@ -284,7 +310,7 @@ function Empleado() {
       activeKey={tab}
       onSelect={setTab}
       usuario={usuario}
-      title={tab === "resumen" ? "Resumen operativo" : tab === "productos" ? "Gestión de productos" : tab === "servicios" ? "Gestión de servicios" : tab === "ventas" ? "Ventas" : tab === "facturas" ? "Facturas" : "Bandeja de soporte"}
+      title={tab === "resumen" ? "Resumen operativo" : tab === "productos" ? "Gestión de productos" : tab === "servicios" ? "Gestión de servicios" : tab === "carritos" ? "Carritos activos" : tab === "ventas" ? "Ventas" : tab === "facturas" ? "Facturas" : "Bandeja de soporte"}
     >
 
       {tab === "resumen" && resumen && (
@@ -470,7 +496,7 @@ function Empleado() {
         </>
       )}
       {tab === "ventas" && (
-        <div className="nt-table-wrap"><div className="border-b border-white/5 p-4"><h2 className="font-display text-lg font-semibold text-white">Ventas registradas</h2><p className="mt-1 text-sm text-gray-500">Consulta el estado y valor de cada venta.</p></div><TableControls search={filtroVentas} onSearchChange={(value) => { setFiltroVentas(value); setPaginaVentas(1); }} page={paginaVentas} totalPages={paginasVentas} totalItems={ventasFiltradas.length} pageSize={paginaCatalogo} onPrevious={() => setPaginaVentas((page) => Math.max(1, page - 1))} onNext={() => setPaginaVentas((page) => Math.min(paginasVentas, page + 1))} placeholder="Buscar venta o cliente..." /><div className="overflow-x-auto"><table className="nt-table min-w-[850px] text-sm"><thead><tr><th>Venta</th><th>Cliente</th><th>Correo</th><th>Fecha</th><th>Estado</th><th>Total</th></tr></thead><tbody>{ventasVisibles.length === 0 ? <tr><td colSpan="6" className="p-8 text-center text-gray-500">No hay ventas que coincidan.</td></tr> : ventasVisibles.map((venta) => <tr key={venta.id}><td className="p-4 font-medium text-white">#{venta.id}</td><td className="p-4 text-gray-300">{nombreCliente(venta.cliente_id)}</td><td className="p-4 text-gray-400">{correoCliente(venta.cliente_id) || "—"}</td><td className="p-4 text-gray-300">{venta.fecha ? new Date(venta.fecha).toLocaleDateString("es-CO") : "—"}</td><td className="p-4"><span className="nt-badge capitalize border-[#4ea1ff]/40 text-[#78b9ff]">{venta.estado}</span></td><td className="p-4 font-medium text-white">{formatoCOP(venta.total)}</td></tr>)}</tbody></table></div></div>
+        <div className="nt-table-wrap"><div className="border-b border-white/5 p-4"><h2 className="font-display text-lg font-semibold text-white">Ventas registradas</h2><p className="mt-1 text-sm text-gray-500">Consulta el estado y valor de cada venta.</p></div><TableControls search={filtroVentas} onSearchChange={(value) => { setFiltroVentas(value); setPaginaVentas(1); }} page={paginaVentas} totalPages={paginasVentas} totalItems={ventasFiltradas.length} pageSize={paginaCatalogo} onPrevious={() => setPaginaVentas((page) => Math.max(1, page - 1))} onNext={() => setPaginaVentas((page) => Math.min(paginasVentas, page + 1))} placeholder="Buscar venta o cliente..." /><div className="overflow-x-auto"><table className="nt-table min-w-[950px] text-sm"><thead><tr><th>Venta</th><th>Cliente</th><th>Correo</th><th>Fecha</th><th>Estado</th><th>Total</th><th>Acción</th></tr></thead><tbody>{ventasVisibles.length === 0 ? <tr><td colSpan="7" className="p-8 text-center text-gray-500">No hay ventas que coincidan.</td></tr> : ventasVisibles.map((venta) => <tr key={venta.id}><td className="p-4 font-medium text-white">#{venta.id}</td><td className="p-4 text-gray-300">{nombreCliente(venta.cliente_id)}</td><td className="p-4 text-gray-400">{correoCliente(venta.cliente_id) || "—"}</td><td className="p-4 text-gray-300">{venta.fecha ? new Date(venta.fecha).toLocaleDateString("es-CO") : "—"}</td><td className="p-4"><span className="nt-badge capitalize border-[#4ea1ff]/40 text-[#78b9ff]">{venta.estado}</span></td><td className="p-4 font-medium text-white">{formatoCOP(venta.total)}</td><td className="p-4">{venta.estado === "pendiente" ? <button type="button" onClick={() => solicitarCancelacionVenta(venta)} className="whitespace-nowrap rounded-md border border-red-300/20 bg-red-400/10 px-3 py-2 text-xs font-medium text-red-200 transition hover:bg-red-400/20">Cancelar</button> : <span className="text-xs text-gray-600">—</span>}</td></tr>)}</tbody></table></div></div>
       )}
 
       {tab === "facturas" && (
@@ -478,6 +504,7 @@ function Empleado() {
       )}
 
       {tab === "soporte" && <SupportInbox token={token} />}
+      {tab === "carritos" && <CarritosActivos token={token} />}
       <Toast notice={notificacion} onClose={() => setNotificacion(null)} />
       <ConfirmDialog
         open={Boolean(confirmacion)}

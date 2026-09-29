@@ -17,6 +17,20 @@ PAYMENT_TRANSITIONS = {
 }
 
 
+def restaurar_stock_venta(db, venta: models.Venta) -> None:
+    for detalle in venta.detalles:
+        if not detalle.producto_id:
+            continue
+        producto = (
+            db.query(models.Producto)
+            .filter(models.Producto.id == detalle.producto_id)
+            .with_for_update()
+            .first()
+        )
+        if producto and producto.stock is not None:
+            producto.stock += detalle.cantidad
+
+
 def respuesta_pago(payment: models.Payment) -> dict:
     return {
         "id": str(payment.id), "venta_id": payment.venta_id,
@@ -39,12 +53,26 @@ def _url_retorno_stripe(payment: models.Payment, tipo: str) -> str:
 
 
 def _linea_checkout(venta: models.Venta, resumen: str) -> list[dict]:
+    subtotal = getattr(venta, "subtotal", None)
+    descuento = getattr(venta, "descuento", Decimal("0")) or Decimal("0")
+    impuestos = getattr(venta, "impuestos", None)
+    if subtotal is None or impuestos is None:
+        descripcion = resumen[:500]
+    else:
+        formato_cop = lambda valor: f"${int(Decimal(valor)):,.0f}".replace(",", ".")
+        desglose = (
+            f"Subtotal: {formato_cop(subtotal)} COP | "
+            f"Descuento: -{formato_cop(descuento)} COP | "
+            f"IVA (19%): {formato_cop(impuestos)} COP | "
+            f"Total: {formato_cop(venta.total)} COP"
+        )
+        descripcion = f"{resumen[:220]} | {desglose}"[:500]
     return [{
         "price_data": {
             "currency": "cop",
             "product_data": {
                 "name": f"Compra NexoTech #{venta.id}",
-                "description": resumen[:500],
+                "description": descripcion,
             },
             "unit_amount": int(Decimal(venta.total) * 100),
         },
@@ -114,7 +142,8 @@ def _crear_factura_si_no_existe(db, venta: models.Venta) -> None:
         return
     db.add(models.Factura(
         venta_id=venta.id, numero_factura=f"NXT-{venta.id:08d}", cliente_id=venta.cliente_id,
-        subtotal=venta.subtotal, impuestos=venta.impuestos, total=venta.total, estado="emitida",
+        subtotal=venta.subtotal, descuento=venta.descuento,
+        impuestos=venta.impuestos, total=venta.total, estado="emitida",
         detalles=[models.DetalleFactura(producto_id=d.producto_id, servicio_id=d.servicio_id, cantidad=d.cantidad,
             precio_unitario=d.precio_unitario, subtotal=d.subtotal) for d in venta.detalles],
     ))
@@ -133,4 +162,7 @@ def aplicar_estado_pago(db, payment: models.Payment, status: str, event: dict | 
     if status == "APPROVED":
         payment.venta.estado = "pagada"
         _crear_factura_si_no_existe(db, payment.venta)
+    elif status in {"DECLINED", "EXPIRED", "VOIDED", "ERROR"} and payment.venta.estado == "pendiente":
+        restaurar_stock_venta(db, payment.venta)
+        payment.venta.estado = "cancelada"
     return True

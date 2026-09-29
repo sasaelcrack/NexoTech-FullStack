@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app import auth, models, schemas
 from app.database import get_db
 from app.integrations.stripe_provider import CheckoutNoCancelableError, StripeProvider
+from app.services.payment_service import restaurar_stock_venta
 
 
 router = APIRouter(prefix="/api/ventas", tags=["Ventas"])
@@ -66,8 +67,9 @@ def crear_venta(
         raise HTTPException(status_code=403, detail="Solo el personal autorizado puede aplicar descuentos")
     if descuento > subtotal:
         raise HTTPException(status_code=400, detail="El descuento no puede superar el subtotal")
-    impuestos = (subtotal * IVA_RATE).quantize(Decimal("0.01"))
-    total = subtotal - descuento + impuestos
+    base_gravable = subtotal - descuento
+    impuestos = (base_gravable * IVA_RATE).quantize(Decimal("0.01"))
+    total = base_gravable + impuestos
     if total < 0:
         raise HTTPException(status_code=400, detail="El descuento no puede superar el subtotal más impuestos")
 
@@ -83,6 +85,10 @@ def crear_venta(
         detalles=detalles,
     )
     db.add(nueva_venta)
+    if payload.get("rol_id") == 3:
+        db.query(models.CarritoActivo).filter(
+            models.CarritoActivo.usuario_id == usuario_id
+        ).delete(synchronize_session=False)
     db.commit()
     db.refresh(nueva_venta)
     return nueva_venta
@@ -153,16 +159,7 @@ def _cancelar_venta_pendiente(db: Session, venta: models.Venta):
         else:
             pago.status = "VOIDED"
 
-    for detalle in venta.detalles:
-        if detalle.producto_id:
-            producto = (
-                db.query(models.Producto)
-                .filter(models.Producto.id == detalle.producto_id)
-                .with_for_update()
-                .first()
-            )
-            if producto and producto.stock is not None:
-                producto.stock += detalle.cantidad
+    restaurar_stock_venta(db, venta)
 
     venta.estado = "cancelada"
     db.commit()

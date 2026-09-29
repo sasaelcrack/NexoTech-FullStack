@@ -7,6 +7,7 @@ function formatoFecha(valor) {
 
 function SupportInbox({ token }) {
   const [pqrs, setPqrs] = useState([]);
+  const [clientes, setClientes] = useState([]);
   const [conversaciones, setConversaciones] = useState([]);
   const [conversacionActiva, setConversacionActiva] = useState(null);
   const [respuestas, setRespuestas] = useState({});
@@ -19,14 +20,16 @@ function SupportInbox({ token }) {
     setCargando(true);
     setError("");
     try {
-      const [resPqrs, resChats] = await Promise.all([
+      const [resPqrs, resChats, resClientes] = await Promise.all([
         fetch(`${API_URL}/pqr/`, { headers: authHeaders(token) }),
         fetch(`${API_URL}/conversaciones/`, { headers: authHeaders(token) }),
+        fetch(`${API_URL}/usuarios/referencias`, { headers: authHeaders(token) }),
       ]);
-      const [dataPqrs, dataChats] = await Promise.all([resPqrs.json(), resChats.json()]);
+      const [dataPqrs, dataChats, dataClientes] = await Promise.all([resPqrs.json(), resChats.json(), resClientes.json()]);
       if (!resPqrs.ok) throw new Error(dataPqrs.detail || "No se pudieron cargar las PQR");
       if (!resChats.ok) throw new Error(dataChats.detail || "No se pudieron cargar las conversaciones");
       setPqrs(dataPqrs);
+      setClientes(resClientes.ok ? dataClientes : []);
       setConversaciones(dataChats);
       setConversacionActiva((actual) => dataChats.find((chat) => chat.id === actual?.id) || dataChats[0] || null);
     } catch (err) {
@@ -34,6 +37,11 @@ function SupportInbox({ token }) {
     } finally {
       setCargando(false);
     }
+  };
+
+  const nombreCliente = (clienteId) => {
+    const cliente = clientes.find((item) => item.id === clienteId);
+    return cliente ? `${cliente.nombre} ${cliente.apellido}` : `Cliente #${clienteId}`;
   };
 
   useEffect(() => {
@@ -100,7 +108,7 @@ function SupportInbox({ token }) {
             {pqrs.length === 0 ? <p className="text-sm text-gray-500">No hay solicitudes registradas.</p> : pqrs.map((pqr) => (
               <article key={pqr.id} className="rounded-xl border border-white/8 bg-[#10121d]/75 p-4 transition hover:border-[#4ea1ff]/35 hover:bg-[#151a29]">
                 <div className="flex justify-between gap-3"><h3 className="text-sm font-medium text-white">{pqr.asunto}</h3><span className={`nt-badge capitalize ${pqr.estado === "cerrada" ? "border-gray-500/50 text-gray-400" : pqr.estado === "respondida" ? "border-[#7c5cff]/50 text-[#b5a8ff]" : "border-[#ffb86b]/50 text-[#ffca8f]"}`}>{pqr.estado}</span></div>
-                <p className="text-xs text-gray-500 mt-1">Cliente #{pqr.cliente_id} · {formatoFecha(pqr.fecha_creacion)}</p>
+                <p className="text-xs text-gray-500 mt-1">{nombreCliente(pqr.cliente_id)} · {formatoFecha(pqr.fecha_creacion)}</p>
                 <p className="text-sm text-gray-300 mt-3 whitespace-pre-wrap">{pqr.descripcion}</p>
                 {pqr.respuesta ? <div className="mt-3 border-l-2 border-[#4ea1ff] bg-[#4ea1ff]/[.06] px-3 py-2 text-sm text-gray-300"><span className="mb-1 block text-xs font-medium text-[#78b9ff]">Respuesta enviada</span>{pqr.respuesta}</div> : (
                   <div className="mt-3 space-y-2">

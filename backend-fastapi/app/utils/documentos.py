@@ -15,16 +15,16 @@ def generar_excel_ventas(ventas, db):
     libro = Workbook()
     hoja = libro.active
     hoja.title = "Ventas"
-    hoja.merge_cells("A1:N1")
+    hoja.merge_cells("A1:P1")
     hoja["A1"] = "NexoTech | Reporte de ventas"
     hoja["A1"].font = Font(bold=True, size=16, color="FFFFFF")
     hoja["A1"].fill = PatternFill("solid", fgColor="1E40AF")
     hoja["A1"].alignment = Alignment(horizontal="center")
-    hoja.merge_cells("A2:N2")
+    hoja.merge_cells("A2:P2")
     hoja["A2"] = "Soluciones tecnológicas | Valores expresados en pesos colombianos (COP)"
     hoja["A2"].font = Font(italic=True, color="666666")
     hoja["A2"].alignment = Alignment(horizontal="center")
-    encabezados = ["Venta", "Cliente", "Correo cliente", "Responsable", "Fecha", "Estado", "Tipo", "Ítem", "Cantidad", "Precio unitario (COP)", "Subtotal ítem (COP)", "Subtotal venta (COP)", "IVA (19%)", "Total venta (COP)"]
+    encabezados = ["Venta", "Cliente", "Correo cliente", "Responsable", "Fecha", "Estado", "Tipo", "Ítem", "Cantidad", "Precio unitario (COP)", "Subtotal ítem (COP)", "Subtotal venta (COP)", "Descuento (COP)", "Base gravable (COP)", "IVA (19%)", "Total venta (COP)"]
     hoja.append([])
     hoja.append(encabezados)
     for celda in hoja[4]:
@@ -54,17 +54,21 @@ def generar_excel_ventas(ventas, db):
                 float(detalle.precio_unitario),
                 float(detalle.subtotal),
                 float(venta.subtotal),
+                float(getattr(venta, "descuento", 0) or 0),
+                float(venta.subtotal - (getattr(venta, "descuento", 0) or 0)),
                 float(venta.impuestos),
                 float(venta.total),
             ])
             for celda in hoja[hoja.max_row]:
                 if celda.data_type == "f":
                     celda.data_type = "s"
-    for columna in ("J", "K", "L", "M", "N"):
+    for columna in ("J", "K", "L", "M", "N", "O", "P"):
         for celda in hoja[columna][4:]:
             celda.number_format = '#,##0'
-    for columna, ancho in {"A": 10, "B": 24, "C": 30, "D": 24, "E": 18, "F": 14, "G": 12, "H": 32, "I": 12, "J": 22, "K": 20, "L": 20, "M": 15, "N": 18}.items():
+    for columna, ancho in {"A": 10, "B": 24, "C": 30, "D": 24, "E": 18, "F": 14, "G": 12, "H": 32, "I": 12, "J": 22, "K": 20, "L": 20, "M": 18, "N": 20, "O": 15, "P": 18}.items():
         hoja.column_dimensions[columna].width = ancho
+    hoja.freeze_panes = "A5"
+    hoja.auto_filter.ref = f"A4:P{hoja.max_row}"
     for fila in hoja.iter_rows(min_row=4):
         for celda in fila:
             celda.alignment = Alignment(vertical="top", wrap_text=True)
@@ -75,7 +79,7 @@ def generar_excel_ventas(ventas, db):
     return archivo
 
 
-def generar_pdf_tabla(titulo: str, encabezados: list[str], filas: list[list[str]], metadata: list[tuple[str, str]] | None = None):
+def generar_pdf_tabla(titulo: str, encabezados: list[str], filas: list[list[str]], metadata: list[tuple[str, str]] | None = None, filas_resumen: int = 0):
     """Genera un PDF sencillo en memoria para facturas y reportes."""
     try:
         from reportlab.lib import colors
@@ -111,6 +115,15 @@ def generar_pdf_tabla(titulo: str, encabezados: list[str], filas: list[list[str]
         ("TOPPADDING", (0, 0), (-1, -1), 7),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
     ]))
+    if filas_resumen:
+        inicio_resumen = max(1, len(datos_tabla) - filas_resumen)
+        tabla.setStyle(TableStyle([
+            ("BACKGROUND", (0, inicio_resumen), (-1, -1), colors.HexColor("#F3F4F6")),
+            ("LINEABOVE", (0, inicio_resumen), (-1, inicio_resumen), 0.7, colors.HexColor("#9CA3AF")),
+            ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#1E40AF")),
+            ("TEXTCOLOR", (0, -1), (-1, -1), colors.white),
+            ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ]))
     contenido = [Paragraph(escape(titulo), estilos["Title"]), Spacer(1, 0.08 * inch)]
     if metadata:
         estilo_meta = ParagraphStyle("FacturaMeta", parent=estilos["Normal"], fontSize=9, leading=12, textColor=colors.HexColor("#374151"))

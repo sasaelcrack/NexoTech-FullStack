@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { API_URL, authHeaders, getStoredSession } from "../config";
 import DashboardLayout from "../components/DashboardLayout";
 import SupportInbox from "../components/SupportInbox";
+import CarritosActivos from "../components/CarritosActivos";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Toast from "../components/Toast";
 import TableControls from "../components/TableControls";
@@ -14,6 +15,7 @@ const menu = [
   { key: "usuarios", label: "Usuarios", icon: IconUsers },
   { key: "productos", label: "Productos", icon: IconBox },
   { key: "servicios", label: "Servicios", icon: IconWrench },
+  { key: "carritos", label: "Carritos activos", icon: IconReceipt },
   { key: "soporte", label: "Soporte", icon: IconMessage },
   { key: "reportes", label: "Reportes", icon: IconReceipt },
 ];
@@ -76,6 +78,16 @@ function Admin() {
 
   const token = localStorage.getItem("token");
   const usuarioGuardado = getStoredSession();
+  const modalAbierto = Boolean(editando || editandoProducto || creandoProducto || editandoServicio || creandoServicio);
+
+  useEffect(() => {
+    if (!modalAbierto) return undefined;
+    const overflowAnterior = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = overflowAnterior;
+    };
+  }, [modalAbierto]);
 
   useEffect(() => {
     if (!token || !usuarioGuardado || usuarioGuardado.rol_id !== 1) {
@@ -212,6 +224,30 @@ function Admin() {
     } catch (err) {
       setNotificacion({ type: "error", message: err.message });
     }
+  };
+
+  const solicitarCancelacionVenta = (venta) => {
+    setConfirmacion({
+      title: `Cancelar venta #${venta.id}`,
+      description: "Se cerrará el checkout de Stripe y se devolverán las existencias reservadas. Esta acción no se puede deshacer.",
+      confirmLabel: "Cancelar venta pendiente",
+      danger: true,
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`${API_URL}/ventas/${venta.id}/estado`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json", ...authHeaders(token) },
+            body: JSON.stringify({ estado: "cancelada" }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.detail || "No se pudo cancelar la venta");
+          setNotificacion({ type: "success", message: `La venta #${venta.id} fue cancelada.` });
+          await cargarAnalitica();
+        } catch (err) {
+          setNotificacion({ type: "error", message: err.message });
+        }
+      },
+    });
   };
 
   const eliminarUsuario = (id) => {
@@ -527,6 +563,8 @@ function Admin() {
           ? "Gestión de productos"
           : activeKey === "servicios"
           ? "Gestión de servicios"
+            : activeKey === "carritos"
+              ? "Carritos activos"
           : activeKey === "soporte"
           ? "Bandeja de soporte"
           : "Reporte de ventas"
@@ -607,8 +645,8 @@ function Admin() {
                   <td className="p-4 text-white font-medium whitespace-nowrap">{u.nombre} {u.apellido}</td>
                   <td className="p-4 text-gray-300 whitespace-nowrap">{u.correo}</td>
                   <td className="p-4 text-gray-300">{u.telefono || "—"}</td>
-                  <td className="p-4">
-                    <select value={u.rol_id} onChange={(e) => cambiarRol(u.id, e.target.value)} className="rounded-md bg-white/5 border border-white/10 px-2 py-1 text-xs text-white cursor-pointer">
+                  <td className="p-4 whitespace-nowrap">
+                    <select aria-label={`Rol de ${u.nombre} ${u.apellido}`} value={String(u.rol_id)} onChange={(e) => cambiarRol(u.id, e.target.value)} className="h-9 min-w-28 whitespace-nowrap rounded-md border border-white/10 bg-[#171b29] px-2.5 text-xs font-medium text-white shadow-sm cursor-pointer">
                       <option value="1" className="bg-[#1a1a26]">Admin</option>
                       <option value="2" className="bg-[#1a1a26]">Empleado</option>
                       <option value="3" className="bg-[#1a1a26]">Cliente</option>
@@ -760,6 +798,7 @@ function Admin() {
       )}
 
       {activeKey === "soporte" && <SupportInbox token={token} />}
+      {activeKey === "carritos" && <CarritosActivos token={token} />}
 
       {activeKey === "reportes" && (
         <div className="space-y-5">
@@ -786,8 +825,8 @@ function Admin() {
             </div>
             <div className="nt-table-wrap">
               <TableControls search={busquedaReporte} onSearchChange={(value) => { setBusquedaReporte(value); setPaginaReporte(1); }} page={paginaReporte} totalPages={paginasReporte} totalItems={ventasReporteFiltradas.length} pageSize={paginaTabla} onPrevious={() => setPaginaReporte((page) => Math.max(1, page - 1))} onNext={() => setPaginaReporte((page) => Math.min(paginasReporte, page + 1))} placeholder="Buscar venta, cliente o responsable..." />
-              <table className="nt-table text-sm min-w-[1050px]"><thead><tr><th>Venta</th><th>Cliente</th><th>Ítems</th><th>Responsable</th><th>Fecha</th><th>Estado</th><th>Subtotal</th><th>IVA</th><th>Total</th></tr></thead><tbody>
-                {ventasReporteVisibles.length === 0 ? <tr><td colSpan="9" className="p-8 text-center text-gray-500">No hay ventas que coincidan.</td></tr> : ventasReporteVisibles.map((venta) => <tr key={venta.id} className="border-b border-white/5 last:border-0"><td className="p-4 text-white">#{venta.id}</td><td className="p-4 text-gray-300"><span className="block">{venta.cliente_nombre}</span><span className="text-xs text-gray-500">{venta.cliente_correo}</span></td><td className="p-4 text-gray-300">{venta.items?.join(", ") || "—"}</td><td className="p-4 text-gray-300">{venta.responsable}</td><td className="p-4 text-gray-300">{venta.fecha ? new Date(venta.fecha).toLocaleDateString("es-CO") : "—"}</td><td className="p-4 capitalize text-[#4ea1ff]">{venta.estado}</td><td className="p-4 text-white">{formatoCOP(venta.subtotal)}</td><td className="p-4 text-white">{formatoCOP(venta.impuestos)}</td><td className="p-4 text-white">{formatoCOP(venta.total)}</td></tr>)}
+              <table className="nt-table text-sm min-w-[1160px]"><thead><tr><th>Venta</th><th>Cliente</th><th>Ítems</th><th>Responsable</th><th>Fecha</th><th>Estado</th><th>Subtotal</th><th>IVA</th><th>Total</th><th>Acción</th></tr></thead><tbody>
+                {ventasReporteVisibles.length === 0 ? <tr><td colSpan="10" className="p-8 text-center text-gray-500">No hay ventas que coincidan.</td></tr> : ventasReporteVisibles.map((venta) => <tr key={venta.id} className="border-b border-white/5 last:border-0"><td className="p-4 text-white">#{venta.id}</td><td className="p-4 text-gray-300"><span className="block">{venta.cliente_nombre}</span><span className="text-xs text-gray-500">{venta.cliente_correo}</span></td><td className="p-4 text-gray-300">{venta.items?.join(", ") || "—"}</td><td className="p-4 text-gray-300">{venta.responsable}</td><td className="p-4 text-gray-300">{venta.fecha ? new Date(venta.fecha).toLocaleDateString("es-CO") : "—"}</td><td className="p-4 capitalize text-[#4ea1ff]">{venta.estado}</td><td className="p-4 text-white">{formatoCOP(venta.subtotal)}</td><td className="p-4 text-white">{formatoCOP(venta.impuestos)}</td><td className="p-4 text-white">{formatoCOP(venta.total)}</td><td className="p-4">{venta.estado === "pendiente" ? <button type="button" onClick={() => solicitarCancelacionVenta(venta)} className="whitespace-nowrap rounded-md border border-red-300/20 bg-red-400/10 px-3 py-2 text-xs font-medium text-red-200 transition hover:bg-red-400/20">Cancelar</button> : <span className="text-xs text-gray-600">—</span>}</td></tr>)}
               </tbody></table>
             </div>
           </>}
@@ -795,8 +834,9 @@ function Admin() {
       )}
 
       {editando && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/55 px-4 py-4 backdrop-blur-sm sm:items-center">
-          <div className="my-4 max-h-[calc(100vh-2rem)] w-full max-w-sm overflow-y-auto rounded-2xl border border-white/10 bg-[#1a1a26] p-6">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/55 backdrop-blur-sm">
+          <div className="flex min-h-full items-start justify-center px-4 py-4 sm:items-center">
+          <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#1a1a26] p-6">
             <h2 className="font-display text-xl font-semibold text-white mb-5">Editar usuario</h2>
 
             {["nombre", "apellido", "correo", "telefono"].map((campo) => (
@@ -820,12 +860,14 @@ function Admin() {
               </button>
             </div>
           </div>
+          </div>
         </div>
       )}
 
       {(editandoProducto || creandoProducto) && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/55 px-4 py-4 backdrop-blur-sm sm:items-center">
-          <div className="my-4 max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-2xl border border-white/10 bg-[#1a1a26] p-6">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/55 backdrop-blur-sm">
+          <div className="flex min-h-full items-start justify-center px-4 py-4 sm:items-center">
+          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#1a1a26] p-6">
             <h2 className="font-display text-xl font-semibold text-white mb-5">
               {creandoProducto ? "Nuevo producto" : "Editar producto"}
             </h2>
@@ -914,11 +956,13 @@ function Admin() {
               </button>
             </div>
           </div>
+          </div>
         </div>
       )}
       {(editandoServicio || creandoServicio) && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/55 px-4 py-4 backdrop-blur-sm sm:items-center">
-          <div className="my-4 max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-2xl border border-white/15 bg-[#202231] p-6 shadow-2xl shadow-black/50">
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/55 backdrop-blur-sm">
+          <div className="flex min-h-full items-start justify-center px-4 py-4 sm:items-center">
+          <div className="w-full max-w-md rounded-2xl border border-white/15 bg-[#202231] p-6 shadow-2xl shadow-black/50">
             <h2 className="mb-5 font-display text-xl font-semibold text-white">{creandoServicio ? "Nuevo servicio" : "Editar servicio"}</h2>
             <label className="mb-1 block text-sm text-gray-400">Nombre</label>
             <input value={formServicio.nombre} onChange={(e) => setFormServicio({ ...formServicio, nombre: e.target.value })} minLength="2" maxLength="100" required className="mb-3 w-full rounded-lg border border-white/15 bg-[#151724] p-2.5 text-white outline-none placeholder:text-gray-600 focus:border-[#4ea1ff]" />
@@ -927,6 +971,7 @@ function Admin() {
             <label className="mb-1 block text-sm text-gray-400">Precio en pesos colombianos</label>
             <input type="text" inputMode="numeric" placeholder="Ej. 50.000" required value={formServicio.precio} onChange={(e) => setFormServicio({ ...formServicio, precio: e.target.value })} className="mb-5 w-full rounded-lg border border-white/15 bg-[#151724] p-2.5 text-white outline-none focus:border-[#4ea1ff]" />
             <div className="flex gap-3"><button onClick={guardarServicio} className="flex-1 rounded-lg bg-[#4ea1ff] py-2 font-medium text-white hover:bg-[#3a8fee]">Guardar</button><button onClick={cerrarModalServicio} className="flex-1 rounded-lg bg-white/10 py-2 text-white hover:bg-white/20">Cancelar</button></div>
+          </div>
           </div>
         </div>
       )}

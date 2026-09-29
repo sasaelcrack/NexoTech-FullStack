@@ -63,6 +63,8 @@ def reporte_ventas(
             "fecha": venta.fecha,
             "total": float(venta.total),
             "subtotal": float(venta.subtotal),
+            "descuento": float(venta.descuento),
+            "base_gravable": float(venta.subtotal - venta.descuento),
             "impuestos": float(venta.impuestos),
             "estado": venta.estado,
         }

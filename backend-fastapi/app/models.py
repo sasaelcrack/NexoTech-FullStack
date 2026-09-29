@@ -149,12 +149,21 @@ class Factura(Base):
     fecha = Column(TIMESTAMP, nullable=False, server_default=func.now())
     cliente_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False, index=True)
     subtotal = Column(Numeric(12, 2), nullable=False)
+    descuento = Column(Numeric(12, 2), nullable=False, default=0, server_default="0")
     impuestos = Column(Numeric(12, 2), nullable=False, default=0)
     total = Column(Numeric(12, 2), nullable=False)
     estado = Column(String(20), nullable=False, default="emitida")
 
     venta = relationship("Venta", back_populates="factura")
     detalles = relationship("DetalleFactura", back_populates="factura", cascade="all, delete-orphan")
+
+
+class CarritoActivo(Base):
+    __tablename__ = "carritos_activos"
+
+    usuario_id = Column(Integer, ForeignKey("usuarios.id", ondelete="CASCADE"), primary_key=True)
+    items = Column(JSON, nullable=False, default=list)
+    actualizado_en = Column(TIMESTAMP, nullable=False, server_default=func.now(), onupdate=func.now(), index=True)
 
 
 class DetalleFactura(Base):
